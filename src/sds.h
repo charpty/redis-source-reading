@@ -161,9 +161,18 @@ static inline size_t sdsavail(const sds s) {
     return 0;
 }
 
+/*
+ * 设置SDS的头部sdshdr结构体中的len属性值
+ *
+ * 参数列表
+ *      1. s: 待设置的字符串
+ *      2. newlen: 要设置的值
+ *
+ */
 static inline void sdssetlen(sds s, size_t newlen) {
     unsigned char flags = s[-1];
     switch(flags&SDS_TYPE_MASK) {
+        // 重复说一下，当字符串长度小于32时，为了节约空间，直接使用flags顺带存储字符串的长度
         case SDS_TYPE_5:
             {
                 unsigned char *fp = ((unsigned char*)s)-1;

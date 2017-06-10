@@ -771,15 +771,30 @@ sds sdscatfmt(sds s, char const *fmt, ...) {
  *
  * Output will be just "Hello World".
  */
+/*
+ * 去除sds字符串左右两边的指定字符
+ *
+ * 参数列表
+ *      1. s: 待修剪的字符串
+ *      2. cset: 要去除的字符
+ * 返回值
+ *      因为最后字符串肯定短于或等于原字符串，所以返回的就是入参sds本身
+ */
 sds sdstrim(sds s, const char *cset) {
     char *start, *end, *sp, *ep;
     size_t len;
 
     sp = start = s;
     ep = end = s+sdslen(s)-1;
+    // 从第一字符开始找，直到cset字符串中不包含该字符为止
     while(sp <= end && strchr(cset, *sp)) sp++;
+    // 从最后一个字符开始找，直到cset字符串不包含该字符为止
+    // 前面sp已经找过，所以仅需找到sp停留位置即可
     while(ep > sp && strchr(cset, *ep)) ep--;
+    // 没必要判断sp和ep的大小,即使sp大也是sp-ep=-1？
+    // 计算修剪后新字符串的长度
     len = (sp > ep) ? 0 : ((ep-sp)+1);
+    // 仅当左边字符串背修剪过才需要移动
     if (s != sp) memmove(s, sp, len);
     s[len] = '\0';
     sdssetlen(s,len);
@@ -802,10 +817,19 @@ sds sdstrim(sds s, const char *cset) {
  * s = sdsnew("Hello World");
  * sdsrange(s,1,-1); => "ello World"
  */
+/*
+ * 截取给定字符串指定范围[start,end]的内容并设置为该SDS的新内容
+ *
+ * 参数列表
+ *      1. s: 待截取的字符串
+ *      2. start: 开始区间（包含）,为负数时则从末尾往前倒数, 实际最小为0
+ *      3. end: 结束区间（包含）， 为负数时则从末尾往前倒数, 实际最大为sdslen(s) - 1
+ */
 void sdsrange(sds s, int start, int end) {
     size_t newlen, len = sdslen(s);
 
     if (len == 0) return;
+    // 为负数时则从末尾倒数，实际最小为0
     if (start < 0) {
         start = len+start;
         if (start < 0) start = 0;
@@ -814,11 +838,14 @@ void sdsrange(sds s, int start, int end) {
         end = len+end;
         if (end < 0) end = 0;
     }
+    // 如果设置的start比end大代表着将整个字符串清空(首个字符将被设置为'\0')
     newlen = (start > end) ? 0 : (end-start)+1;
     if (newlen != 0) {
+        // 分别检查开始和结束是否超出了字符串本身区间范围
         if (start >= (signed)len) {
             newlen = 0;
         } else if (end >= (signed)len) {
+            // 超出最大长度则默认为末尾位置
             end = len-1;
             newlen = (start > end) ? 0 : (end-start)+1;
         }
@@ -831,16 +858,28 @@ void sdsrange(sds s, int start, int end) {
 }
 
 /* Apply tolower() to every character of the sds string 's'. */
+/*
+ * 将sds字符串转换为小写
+ *
+ * 参数列表
+ *      1. s: 待转换的字符串
+ * /
 void sdstolower(sds s) {
     int len = sdslen(s), j;
-
+    // 循环调用ctype.h库中的标准函数tolower
     for (j = 0; j < len; j++) s[j] = tolower(s[j]);
 }
 
 /* Apply toupper() to every character of the sds string 's'. */
+/*
+ * 将sds字符串转换为大写
+ *
+ * 参数列表
+ *      1. s: 待转换的字符串
+ * /
 void sdstoupper(sds s) {
     int len = sdslen(s), j;
-
+    // 循环调用ctype.h库中的标准函数toupper
     for (j = 0; j < len; j++) s[j] = toupper(s[j]);
 }
 
