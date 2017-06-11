@@ -40,12 +40,14 @@
 #include <stdint.h>
 
 // 类型别名，指向sdshdr结构体中的buf属性，也就是实际的字符串的指针
-// 注意将其与大写SDS区分，SDS泛指的Redis设计的动态字符串结构(结构体sdshdr + 实际字符串)
+// 注意将其与大写SDS区分，SDS泛指的Redis设计的动态字符串结构(结构体sdshdr + 实际字符串sds)
 typedef char *sds;
 
 /* Note: sdshdr5 is never used, we just access the flags byte directly.
  * However is here to document the layout of type 5 SDS strings. */
 struct __attribute__ ((__packed__)) sdshdr5 {
+    // 二进制后3位为实际标志位，前5位记录字符串长度
+    // sdshdr5内存是用多少分配多少，没有额外分配，所以也不需要记录分配总长度（等于字符串长度）
     unsigned char flags; /* 3 lsb of type, and 5 msb of string length */
     char buf[];
 };
@@ -56,7 +58,7 @@ struct __attribute__ ((__packed__)) sdshdr8 {
     uint8_t len; /* used */
     // 为buf分配的总长度，之前版本记录的是free(还剩下多少长度)
     uint8_t alloc; /* excluding the header and null terminator */
-    // 新增属性，记录该结构体的实际类型
+    // 新增属性，记录该结构体的实际类型，标志位仅二进制后3位，前5位仅对sdshdr5结构体有用
     unsigned char flags; /* 3 lsb of type, 5 unused bits */
     // 柔性数组（动态数组），为结构体分配内存的时候顺带分配，作为字符串的实际存储内存
     // 由于buf不占内存，所以buf的地址就是结构体尾部的地址，也是字符串开始的地址
