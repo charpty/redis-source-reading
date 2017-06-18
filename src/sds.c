@@ -920,7 +920,7 @@ void sdsrange(sds s, int start, int end) {
  *
  * 参数列表
  *      1. s: 待转换的字符串
- * /
+ */
 void sdstolower(sds s) {
     int len = sdslen(s), j;
     // 循环调用ctype.h库中的标准函数tolower
@@ -933,7 +933,7 @@ void sdstolower(sds s) {
  *
  * 参数列表
  *      1. s: 待转换的字符串
- * /
+ */
 void sdstoupper(sds s) {
     int len = sdslen(s), j;
     // 循环调用ctype.h库中的标准函数toupper
