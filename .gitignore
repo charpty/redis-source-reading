@@ -1,3 +1,4 @@
+.DS_Store
 .*.swp
 *.o
 *.log
@@ -28,4 +29,3 @@ deps/lua/src/liblua.a
 .prerequisites
 *.dSYM
 Makefile.dep
-.DS_Store
