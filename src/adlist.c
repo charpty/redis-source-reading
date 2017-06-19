@@ -347,7 +347,7 @@ listNode *listNext(listIter *iter)
  *
  * The original list both on success or error is never modified. */
 /*
- * 深拷贝整个链表
+ * 深拷贝整个链表(如果没有设置单个节点的拷贝函数则为浅拷贝)
  *
  * 参数列表
  *      1. orig: 待复制的链表
