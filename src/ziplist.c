@@ -190,7 +190,13 @@
 #include "endianconv.h"
 #include "redisassert.h"
 
+// 用于标记整个压缩列表的结束
 #define ZIP_END 255         /* Special "end of ziplist" entry. */
+/*
+ * 仅作用列表节点的第一个元素，也就是记录前一个节点长度的prevlen
+ * 当prevlen的第一个char小于254时，则这个char就代表了前一个节点的长度
+ * 当prvvlen的第一个char等于254时，则该char后4个char代表了前一个节点的长度
+ */
 #define ZIP_BIG_PREVLEN 254 /* Max number of bytes of the previous entry, for
                                the "prevlen" field prefixing each entry, to be
                                represented with just a single byte. Otherwise
@@ -227,9 +233,12 @@
 /* Utility macros.*/
 
 /* Return total bytes a ziplist is composed of. */
+// 压缩列表总的内存分配大小对应值，压缩列表第一个元素就是总分配内存值(32整型)
+// 这里做了取值操作，所以也可以进行赋值操作
 #define ZIPLIST_BYTES(zl)       (*((uint32_t*)(zl)))
 
 /* Return the offset of the last item inside the ziplist. */
+// 压缩列表尾部元素的地址，压缩列表第二个元素就是最后一个元素的地址，类型为32位整型
 #define ZIPLIST_TAIL_OFFSET(zl) (*((uint32_t*)((zl)+sizeof(uint32_t))))
 
 /* Return the length of a ziplist, or UINT16_MAX if the length cannot be
@@ -239,16 +248,25 @@
 /* The size of a ziplist header: two 32 bit integers for the total
  * bytes count and last item offset. One 16 bit integer for the number
  * of items field. */
+/*
+ * 压缩列表头部，共有3部分组成
+ *  1、总共的内存分配大小，使用32位整型表示
+ *  2、最后一个实际节点的偏移位置，使用32位整型表示，主要用于从后往前遍历
+ *  3、总共有多少个节点，使用16位short表示
+ */
 #define ZIPLIST_HEADER_SIZE     (sizeof(uint32_t)*2+sizeof(uint16_t))
 
 /* Size of the "end of ziplist" entry. Just one byte. */
+// 用于标记压缩列表尾部，仅用一个Byte(8byte)表示，值为255时代表列表尾部
 #define ZIPLIST_END_SIZE        (sizeof(uint8_t))
 
 /* Return the pointer to the first entry of a ziplist. */
+// 获取压缩列表第一个节点的地址，也就是列表地址+列表头偏移值
 #define ZIPLIST_ENTRY_HEAD(zl)  ((zl)+ZIPLIST_HEADER_SIZE)
 
 /* Return the pointer to the last entry of a ziplist, using the
  * last entry offset inside the ziplist header. */
+// 获取压缩列表最后一个节点的地址,该值记录在列表头中第二个元素
 #define ZIPLIST_ENTRY_TAIL(zl)  ((zl)+intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl)))
 
 /* Return the pointer to the last byte of a ziplist, which is, the
@@ -268,6 +286,7 @@
 /* We use this function to receive information about a ziplist entry.
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
+//  Redis压缩队列的具体节点
 typedef struct zlentry {
     unsigned int prevrawlensize; /* Bytes used to encode the previos entry len*/
     unsigned int prevrawlen;     /* Previous entry len. */
@@ -420,6 +439,13 @@ unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
 
 /* Return the number of bytes used to encode the length of the previous
  * entry. The length is returned by setting the var 'prevlensize'. */
+/*
+ * 给prevlensize赋值，也就是存储前一个节点的长度的元素的长度(也就是说这个元素长度是动态的)
+ * 有两种情况
+ *  1、当这个元素的第一个char小于254，那就是说前一个节点长度短于254，用一个char表示即可，赋值1
+ *  2、当元素第一个char等于254，就用4个char表示前一个节点长度，加上标志位，则赋值5
+ *
+ */
 #define ZIP_DECODE_PREVLENSIZE(ptr, prevlensize) do {                          \
     if ((ptr)[0] < ZIP_BIG_PREVLEN) {                                          \
         (prevlensize) = 1;                                                     \
@@ -435,6 +461,17 @@ unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
  * The length of the previous entry is stored in 'prevlen', the number of
  * bytes needed to encode the previous entry length are stored in
  * 'prevlensize'. */
+/*
+ * 宏本身的作用是找出列表中指定节点的长度并赋值给prevlen
+ * 根据宏的语意来说是要算出前一个节点的长度，所以ptr应该要传前一个节点的指针
+ * 宏的步骤如下
+ *  1、先算出记录节点长度的元素的长度（长度为1或者5）
+ *  2、如果长度为1，那说明该节点短于254，也就取第一个char即可
+ *  3、如果长度位5，那除去第一个标记位，后4个char就是具体长度
+ *     首先要求编译器对于int给出的长度必须为4，这是因为判断最大长度是基于此设计的
+ *     使用内存拷贝而不是直接赋值是考虑到多个字符时的内存大小端字节序问题
+ *
+ */
 #define ZIP_DECODE_PREVLEN(ptr, prevlensize, prevlen) do {                     \
     ZIP_DECODE_PREVLENSIZE(ptr, prevlensize);                                  \
     if ((prevlensize) == 1) {                                                  \
@@ -575,12 +612,27 @@ void zipEntry(unsigned char *p, zlentry *e) {
 }
 
 /* Create a new empty ziplist. */
+/*
+ * 创建一个新的压缩列表
+ *
+ * 返回值
+ *      压缩列表的首地址指针
+ */
 unsigned char *ziplistNew(void) {
+    // 压缩列表的头部大小，头部分为3部分
     unsigned int bytes = ZIPLIST_HEADER_SIZE+1;
+    // Redis直接使用char*来表示ziplist，因为本质上压缩列表就是一块连续的内存
     unsigned char *zl = zmalloc(bytes);
+    // 将分配的总内存大小值赋值给压缩列表
+    // 数值统一采用小端字节序
     ZIPLIST_BYTES(zl) = intrev32ifbe(bytes);
+    // 将压缩列表最后一个节点的地址赋值给列表头部第二个元素
+    // 当前压缩列表为空，所以最后一个元素的地址也就是头部元素的尾地址
     ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE);
+    // 记录压缩列表的大小，存入列表头部的第三个元素中(16位整型)
     ZIPLIST_LENGTH(zl) = 0;
+    // 压缩列表的最后一个char中记录了一个特殊标记--255，用于标记是列表的尾部
+    // 所以在压缩或者其它赋值操作中无符号char的最大值为254
     zl[bytes-1] = ZIP_END;
     return zl;
 }
@@ -740,22 +792,42 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
 }
 
 /* Insert item at "p". */
+/*
+ * 在压缩列表指定位置插入一个字符串值
+ *
+ * 参数列表
+ *      1. zl: 待插入的压缩列表
+ *      2. p: 要插入到哪个位置
+ *      3. s: 待插入的字符串(不以NULL结尾)的起始地址
+ *      4. slen: 待插入的字符串的长度，由于不是标准的C字符串，所以需要指定长度
+ *
+ * 返回值
+ *      压缩列表地址
+ */
 unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen) {
+    // 先取出当前压缩列表总内存分配长度
     size_t curlen = intrev32ifbe(ZIPLIST_BYTES(zl)), reqlen;
     unsigned int prevlensize, prevlen = 0;
     size_t offset;
     int nextdiff = 0;
     unsigned char encoding = 0;
+    // 这个初始化值只是为了防止编译器警告
     long long value = 123456789; /* initialized to avoid warning. Using a value
                                     that is easy to see if for some reason
                                     we use it uninitialized. */
     zlentry tail;
 
     /* Find out prevlen for the entry that is inserted. */
+    // 因为每个节点都会记录上一个节点数据占用的内存长度(方便倒序索引)，所以先查出该值
+    // 如果待插入的位置是压缩列表的尾部, 则相当于尾部追加
     if (p[0] != ZIP_END) {
+        // 如果不是插入尾部则根据p正常获取前一个节点的长度
         ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
     } else {
+        // 如果是尾部追加则先获取列表中最后一个节点的地址(注意最后一个节点并不一定是列表结束)
         unsigned char *ptail = ZIPLIST_ENTRY_TAIL(zl);
+        // 如果最后一个节点也是空的(ptail[0]==列表结束标记)则代表整个压缩列表都还是空列表
+        // 如果不是空列表则正常取出最后一个节点的长度
         if (ptail[0] != ZIP_END) {
             prevlen = zipRawEntryLength(ptail);
         }
