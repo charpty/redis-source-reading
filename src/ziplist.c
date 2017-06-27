@@ -205,7 +205,9 @@
                                representing the previous entry len. */
 
 /* Different encoding/length possibilities */
+// 1100 0000
 #define ZIP_STR_MASK 0xc0
+// 0011 0000
 #define ZIP_INT_MASK 0x30
 #define ZIP_STR_06B (0 << 6)
 #define ZIP_STR_14B (1 << 6)
@@ -316,6 +318,12 @@ typedef struct zlentry {
 
 /* Extract the encoding from the byte pointed by 'ptr' and set it into
  * 'encoding' field of the zlentry structure. */
+/*
+ * 取出entry中T-L-V设计中的Type，也就是编码类型
+ * 一共有9种类型:
+ *      当小于1100 0000时，说明仅用前两位表示类型，前两位共可以表示3种类型
+ *      当大于1100 0000时，共有6中类型
+ */
 #define ZIP_ENTRY_ENCODING(ptr, encoding) do {  \
     (encoding) = (ptr[0]); \
     if ((encoding) < ZIP_STR_MASK) (encoding) &= ZIP_STR_MASK; \
@@ -387,6 +395,24 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
  * The 'encoding' variable will hold the entry encoding, the 'lensize'
  * variable will hold the number of bytes required to encode the entry
  * length, and the 'len' variable will hold the entry length. */
+/*
+ * 解析指定到entry节点并将编码类型，存储长度的元素的长度，列表长度的值设置到对应的变量中
+ * 步骤如下
+ *  1、先得到编码类型，一共9种，分别表示使用了几位字符来表示该节点的总长度
+ *  2、编码小于1100 0000共有3种类型，此类型下数据(data)存储的都是字符(char)
+ *      1. 00xxxxxx: 前两位作为标志位，后6位用来记录长度
+ *      2. 01xxxxxx xxxxxxxx 共2位: 使用14位来记录长度，最大值位2^14 - 1
+ *      3. 10xxxxxx xxxxxxxx...共5位: 使用32位来记录长度(带标记位的char整个舍弃不用)，最大值2^32 - 1
+ *  3、编码大于1100 0000共规定了6种类型，长度均采用1个字符表示，每种类型数据的存储格式也各不相同
+ *      4. 1100 0000: 数据长度为192(1100 0000,就是本身),data指针存储数据格式为16字节整型
+ *      5. 1101 0000: 数据长度为208，data指针存储数据格式为32字节整型
+ *      6. 1110 0000: 数据长度为224，data指针存储数据格式为64字节整型
+ *      7. 1111 0000: 数据长度为240，data指针存储数据格式为3字节整型
+ *      8. 1111 1110: 数据长度为254，data指针存储数据格式为1字节整型
+ *      9. 1111 dddd: 特殊情况，后4位表示真实数据，0～12，也就是dddd的值减去1就是真实值
+ *                    之所以减1是因为较小的数字肯定是从0开始，但1111 0000又和第6点冲突
+ *                    最大只到1101因为1110又和第8点冲突
+ */
 #define ZIP_DECODE_LENGTH(ptr, encoding, lensize, len) do {                    \
     ZIP_ENTRY_ENCODING((ptr), (encoding));                                     \
     if ((encoding) < ZIP_STR_MASK) {                                           \
@@ -465,7 +491,7 @@ unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
  * 宏本身的作用是找出列表中指定节点的长度并赋值给prevlen
  * 根据宏的语意来说是要算出前一个节点的长度，所以ptr应该要传前一个节点的指针
  * 宏的步骤如下
- *  1、先算出记录节点长度的元素的长度（长度为1或者5）
+ *  1、先算出记录节点长度的元素的长度(长度为1或者5)
  *  2、如果长度为1，那说明该节点短于254，也就取第一个char即可
  *  3、如果长度位5，那除去第一个标记位，后4个char就是具体长度
  *     首先要求编译器对于int给出的长度必须为4，这是因为判断最大长度是基于此设计的
@@ -505,9 +531,20 @@ int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
 }
 
 /* Return the total number of bytes used by the entry pointed to by 'p'. */
+/*
+ * 获取指定节点的长度值(从TLV中取出L)
+ *
+ * 参数列表
+ *      1. p: 节点的首地址指针
+ *
+ * 返回值
+ *      该节点所占内存总字符长度
+ */
 unsigned int zipRawEntryLength(unsigned char *p) {
     unsigned int prevlensize, encoding, lensize, len;
+    // 第一个元素(用于存储上一个节点的长度)所占大小
     ZIP_DECODE_PREVLENSIZE(p, prevlensize);
+    //
     ZIP_DECODE_LENGTH(p + prevlensize, encoding, lensize, len);
     return prevlensize + lensize + len;
 }
@@ -829,6 +866,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
         // 如果最后一个节点也是空的(ptail[0]==列表结束标记)则代表整个压缩列表都还是空列表
         // 如果不是空列表则正常取出最后一个节点的长度
         if (ptail[0] != ZIP_END) {
+            // 取出尾部节点所占内存字符长度
             prevlen = zipRawEntryLength(ptail);
         }
     }
@@ -1123,6 +1161,18 @@ unsigned int ziplistGet(unsigned char *p, unsigned char **sstr, unsigned int *sl
 }
 
 /* Insert an entry at "p". */
+/*
+ * 在压缩列表指定位置插入一个字符串值
+ *
+ * 参数列表
+ *      1. zl: 待插入的压缩列表
+ *      2. p: 要插入到哪个位置
+ *      3. s: 待插入的字符串(不以NULL结尾)的起始地址
+ *      4. slen: 待插入的字符串的长度，由于不是标准的C字符串，所以需要指定长度
+ *
+ * 返回值
+ *      压缩列表地址
+ */
 unsigned char *ziplistInsert(unsigned char *zl, unsigned char *p, unsigned char *s, unsigned int slen) {
     return __ziplistInsert(zl,p,s,slen);
 }
