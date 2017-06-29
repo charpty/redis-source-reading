@@ -551,13 +551,29 @@ unsigned int zipRawEntryLength(unsigned char *p) {
 
 /* Check if string pointed to by 'entry' can be encoded as an integer.
  * Stores the integer value in 'v' and its encoding in 'encoding'. */
+/*
+ * 检查待添加的值能否使用整型存储，如果可以则设置对应整型值和编码类型
+ *
+ * 参数列表
+ *      1. entry: 待添加的字符串(非标准C字符串)
+ *      2. entrylen: 字符串的长度
+ *      3. v: 出参，如果entry可以使用整型存储则将值设置到该参数中
+ *      4. encoding: 如果entry可以使用整型编码则将具体编码类型设置到此参数中
+ *
+ * 返回值
+ *      能使用整型存储返回1否则返回0
+ *
+ */
 int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, unsigned char *encoding) {
     long long value;
 
+    // 能表示的带符号整型为
     if (entrylen >= 32 || entrylen == 0) return 0;
+    // 如果能转换为长整型以内的数即认为可以(-2^63 ~ 2^63-1)
     if (string2ll((char*)entry,entrylen,&value)) {
         /* Great, the string can be encoded. Check what's the smallest
          * of our encoding types that can hold this value. */
+        //
         if (value >= 0 && value <= 12) {
             *encoding = ZIP_INT_IMM_MIN+value;
         } else if (value >= INT8_MIN && value <= INT8_MAX) {
