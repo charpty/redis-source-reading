@@ -439,6 +439,9 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
 
 /* Encode the length of the previous entry and write it to "p". This only
  * uses the larger encoding (required in __ziplistCascadeUpdate). */
+/*
+ *
+ */
 int zipStorePrevEntryLengthLarge(unsigned char *p, unsigned int len) {
     if (p != NULL) {
         p[0] = ZIP_BIG_PREVLEN;
@@ -450,6 +453,17 @@ int zipStorePrevEntryLengthLarge(unsigned char *p, unsigned int len) {
 
 /* Encode the length of the previous entry and write it to "p". Return the
  * number of bytes needed to encode this length if "p" is NULL. */
+/*
+ * 设置当前节点第一个元素(前一个节点的长度)的值, 并返回存储该值所占的内存长度(1char或者5char)
+ *
+ * 参数列表
+ *      1.p: 当前节点
+ *      2.len: 前一个节点的长度
+ *
+ * 返回值
+ *      存储该长度所需的内存大小,长度小于254时使用一个char即可返回1，其他情况返回5
+ *
+ */
 unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
     if (p == NULL) {
         return (len < ZIP_BIG_PREVLEN) ? 1 : sizeof(len)+1;
@@ -524,6 +538,14 @@ unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
  * So the function returns a positive number if more space is needed,
  * a negative number if less space is needed, or zero if the same space
  * is needed. */
+/*
+ * 算出之前用于存储上一个节点的长度值所需内存大小与当前实际所需大小的差距
+ *
+ * 参数列表
+ *      1.p: 前一个节点的首部指针
+ *      2.len: 旧的长度值
+ *
+ */
 int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
     unsigned int prevlensize;
     ZIP_DECODE_PREVLENSIZE(p, prevlensize);
@@ -573,18 +595,23 @@ int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, un
     if (string2ll((char*)entry,entrylen,&value)) {
         /* Great, the string can be encoded. Check what's the smallest
          * of our encoding types that can hold this value. */
-        //
         if (value >= 0 && value <= 12) {
+            // TLV整个仅占用1个字节 1111 0001(后四位值1)~1111 1101(后四位值13)分别表示0～12
             *encoding = ZIP_INT_IMM_MIN+value;
         } else if (value >= INT8_MIN && value <= INT8_MAX) {
+            // 如果可以使用一个byte表示(-128~127)
             *encoding = ZIP_INT_8B;
         } else if (value >= INT16_MIN && value <= INT16_MAX) {
+            // 如果可以使用一个short表示(-32768~32767)
             *encoding = ZIP_INT_16B;
         } else if (value >= INT24_MIN && value <= INT24_MAX) {
+            // 如果可以使用3个char来表示(-2^23 ~ 2^23-1)))
             *encoding = ZIP_INT_24B;
         } else if (value >= INT32_MIN && value <= INT32_MAX) {
+            // 如果可以使用int表示(-2^31 ~ 2^31-1)
             *encoding = ZIP_INT_32B;
         } else {
+            // 其他统一使用long类型表示
             *encoding = ZIP_INT_64B;
         }
         *v = value;
@@ -891,15 +918,21 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     // 如果可以转换为整型存储则使用整型存储
     if (zipTryEncoding(s,slen,&value,&encoding)) {
         /* 'encoding' is set to the appropriate integer encoding */
+        // 计算整型所占长度
+        // 1位: -128~127，2位: -32768~3276...
         reqlen = zipIntSize(encoding);
     } else {
         /* 'encoding' is untouched, however zipStoreEntryEncoding will use the
          * string length to figure out how to encode it. */
+        // 如果不能转换为整型存储则直接使用字符串(char)方式存储
         reqlen = slen;
     }
     /* We need space for both the length of the previous entry and
      * the length of the payload. */
+    // 除了存储数据(V)，一个节点还还需要存储编码类型(T)和节点长度(L)以及前一个节点的长度
+    // 计算出存储长一个节点长度的值所需要的内存大小
     reqlen += zipStorePrevEntryLength(NULL,prevlen);
+    // 计算处需要存储自己的编码类型所需的内存大小
     reqlen += zipStoreEntryEncoding(NULL,encoding,slen);
 
     /* When the insert position is not equal to the tail, we need to
