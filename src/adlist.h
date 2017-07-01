@@ -38,7 +38,7 @@
  * 按理说直接使用listNode就直接能够构成链表结构但是使用list结构体操作会更加的方便
  */
 typedef struct listNode {
-    // 长一个节点
+    // 前一个节点
     struct listNode *prev;
     struct listNode *next;
     // 节点的具体值指针，由于为void*，所以链表中节点的值类型可以完全各不相同

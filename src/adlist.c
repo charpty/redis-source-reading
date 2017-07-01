@@ -187,22 +187,28 @@ list *listAddNodeTail(list *list, void *value)
 list *listInsertNode(list *list, listNode *old_node, void *value, int after) {
     listNode *node;
 
+    // 如果不能插入新节点则返回空告诉上层调用者插入失败
     if ((node = zmalloc(sizeof(*node))) == NULL)
         return NULL;
     node->value = value;
     if (after) {
+        // 插入到指定节点的后面
         node->prev = old_node;
         node->next = old_node->next;
+        // 如果正好插入到了链表的尾部则将新插入的节点设置链表尾
         if (list->tail == old_node) {
             list->tail = node;
         }
     } else {
+        // 插入到指定节点的前面
         node->next = old_node;
         node->prev = old_node->prev;
+        // 如果正好插入到了链表头部则将新的节点设置为链表头
         if (list->head == old_node) {
             list->head = node;
         }
     }
+    // 设置前后节点对应的前后指针值
     if (node->prev != NULL) {
         node->prev->next = node;
     }
@@ -411,8 +417,11 @@ listNode *listSearchKey(list *list, void *key)
     listIter iter;
     listNode *node;
 
+    // 先重置迭代器的迭代起始位置为链表头
     listRewind(list, &iter);
+    // 调用链表的迭代器逐一遍历链表元素
     while((node = listNext(&iter)) != NULL) {
+        // 如果链表设置了节点匹配函数则使用否则直接比较内存地址
         if (list->match) {
             if (list->match(node->value, key)) {
                 return node;
