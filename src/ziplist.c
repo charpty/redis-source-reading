@@ -356,21 +356,38 @@ unsigned int zipIntSize(unsigned char encoding) {
  *
  * The function returns the number of bytes used by the encoding/length
  * header stored in 'p'. */
+/*
+ * 设置节点p的编码类型(TLV中的T),并返回存储该编码所需的内存
+ * 这里设置的存储节点本身的长度的内存的编码方式
+ *
+ * 参数列表
+ *      1. p: 待设置的节点，为空则不设置
+ *      2. encoding: 编码类型, 一共9种类型，大类上又分为字符存储、整型存储、单字符存储3种
+ *      3. rawlen: 该参数仅仅在使用字符存储时才其作用，是字符串实际的长度
+ *
+ * 返回值
+ *      存储该编码所需的内存大小
+ */
 unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, unsigned int rawlen) {
+    // 存储长度最大值为5个字符
     unsigned char len = 1, buf[5];
 
     if (ZIP_IS_STR(encoding)) {
         /* Although encoding is given it may not be set for strings,
          * so we determine it here using the raw length. */
         if (rawlen <= 0x3f) {
+            // 长度为0～63时仅使用一个char存储，前两位是标志位，后6位用于记录长度
             if (!p) return len;
             buf[0] = ZIP_STR_06B | rawlen;
         } else if (rawlen <= 0x3fff) {
+            // 长度为64～16383时使用两个char存储，前两位时标志位，后14位用于记录长度
             len += 1;
             if (!p) return len;
             buf[0] = ZIP_STR_14B | ((rawlen >> 8) & 0x3f);
             buf[1] = rawlen & 0xff;
         } else {
+            // 其它情况使用1个char作为标志位，4个char记录长度，最大为2^32-1
+            // 用1个char作为标志位(仅两位)其实是浪费了6位，Redis这么做是为了方便后续扩展标志位
             len += 4;
             if (!p) return len;
             buf[0] = ZIP_STR_32B;
@@ -381,11 +398,13 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
         }
     } else {
         /* Implies integer encoding, so length is always 1. */
+        // 用整型编码的永远仅需使用一个char来存储
         if (!p) return len;
         buf[0] = encoding;
     }
 
     /* Store this length at p. */
+    // 执行到此处p一定有效，则将具体长度值设置到p中
     memcpy(p,buf,len);
     return len;
 }
@@ -440,6 +459,15 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
 /* Encode the length of the previous entry and write it to "p". This only
  * uses the larger encoding (required in __ziplistCascadeUpdate). */
 /*
+ * 设置当前节点第一个元素(前一个节点的长度)的值, 并返回存储该值所占的内存长度(5char)
+ * 该函数和zipStorePrevEntryLength一样，只是专用于处理长度较大(大于253)的情况
+ *
+ * 参数列表
+ *      1.p: 当前节点
+ *      2.len: 前一个节点的长度
+ *
+ * 返回值
+ *      存储该长度所需的内存大小,返回5
  *
  */
 int zipStorePrevEntryLengthLarge(unsigned char *p, unsigned int len) {
@@ -503,7 +531,7 @@ unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
  * 'prevlensize'. */
 /*
  * 宏本身的作用是找出列表中指定节点的长度并赋值给prevlen
- * 根据宏的语意来说是要算出前一个节点的长度，所以ptr应该要传前一个节点的指针
+ * 根据宏的语意来说是要算出前一个节点的长度，ptr是当前节点的首部指针(节点头部存有上一节点长度)
  * 宏的步骤如下
  *  1、先算出记录节点长度的元素的长度(长度为1或者5)
  *  2、如果长度为1，那说明该节点短于254，也就取第一个char即可
@@ -542,13 +570,18 @@ unsigned int zipStorePrevEntryLength(unsigned char *p, unsigned int len) {
  * 算出之前用于存储上一个节点的长度值所需内存大小与当前实际所需大小的差距
  *
  * 参数列表
- *      1.p: 前一个节点的首部指针
- *      2.len: 旧的长度值
+ *      1.p: 当前节点的首部指针(第一个元素存储的是前一个节点的长度)
+ *      2.len: 当前节点的长度值，即新的长度值
+ *
+ * 返回值
+ *      要存储新的长度所需内存与原内存的差距
  *
  */
 int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
     unsigned int prevlensize;
+    // 从当前节点中取出前一个节点的长度
     ZIP_DECODE_PREVLENSIZE(p, prevlensize);
+    // 存储当前长度所需内存减去存储前一个节点长度所需的内存大小
     return zipStorePrevEntryLength(NULL, len) - prevlensize;
 }
 
@@ -683,10 +716,19 @@ int64_t zipLoadInteger(unsigned char *p, unsigned char encoding) {
 }
 
 /* Return a struct with all information about an entry. */
+/*
+ * 设置压缩列表节点的属性值
+ *
+ * 参数列表
+ *      1.p: 新节点内存的起始地址
+ *      2.e: 一个节点结构体的指针
+ */
 void zipEntry(unsigned char *p, zlentry *e) {
-
+    // 首先设置该节点第一个元素(存储前一个节点的长度)
     ZIP_DECODE_PREVLEN(p, e->prevrawlensize, e->prevrawlen);
+    // 设置该节点的数据编码类型和数据长度
     ZIP_DECODE_LENGTH(p + e->prevrawlensize, e->encoding, e->lensize, e->len);
+    // 记录节点头部总长度
     e->headersize = e->prevrawlensize + e->lensize;
     e->p = p;
 }
@@ -718,8 +760,19 @@ unsigned char *ziplistNew(void) {
 }
 
 /* Resize the ziplist. */
+/*
+ * 重新分配列表的大小到指定长度
+ *
+ * 参数列表
+ *      1. zl: 待冲分配的列表首部指针
+ *      2. len: 列表新的长度
+ *
+ * 返回值
+ *      新的列表指针，有可能和原指针相同
+ */
 unsigned char *ziplistResize(unsigned char *zl, unsigned int len) {
     zl = zrealloc(zl,len);
+    // 将新的列表长度赋值给列表属性
     ZIPLIST_BYTES(zl) = intrev32ifbe(len);
     zl[len-1] = ZIP_END;
     return zl;
@@ -930,7 +983,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     /* We need space for both the length of the previous entry and
      * the length of the payload. */
     // 除了存储数据(V)，一个节点还还需要存储编码类型(T)和节点长度(L)以及前一个节点的长度
-    // 计算出存储长一个节点长度的值所需要的内存大小
+    // 计算出存储上一个节点长度的值所需要的内存大小
     reqlen += zipStorePrevEntryLength(NULL,prevlen);
     // 计算处需要存储自己的编码类型所需的内存大小
     reqlen += zipStoreEntryEncoding(NULL,encoding,slen);
@@ -938,36 +991,50 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     /* When the insert position is not equal to the tail, we need to
      * make sure that the next entry can hold this entry's length in
      * its prevlen field. */
+    // 计算出存储该节点的长度所需的内存大小并尝试赋值给该节点的下一个节点(每个都节点存储上一个节点的长度)
     int forcelarge = 0;
+    // 如果插入的节点不是列表尾的话，那该节点的下一个节点应该存储该节点的长度
+    // 计算出下一个节点之前已经分配的用于存储上一个节点长度的内存和目前存储实际所需内存的差距
     nextdiff = (p[0] != ZIP_END) ? zipPrevLenByteDiff(p,reqlen) : 0;
+    // 其实存储长度值仅有两种可能，小于254则使用一个char存储，其它则使用5个char存储
     if (nextdiff == -4 && reqlen < 4) {
+        // 如果所需内存减少了(之前一个节点长度比当前节点长)
+        // 但是当前节点又已经存储为较小的整数的情况下(共两种编码)则不进行缩小了
         nextdiff = 0;
         forcelarge = 1;
     }
 
     /* Store offset because a realloc may change the address of zl. */
     offset = p-zl;
+    // 根据新加入的元素所需扩展的内存重新申请内存
     zl = ziplistResize(zl,curlen+reqlen+nextdiff);
+    // 重新申请之后原来的p有可能失效(因为整块列表地址都换了)，所以根据原先偏移量重新计算出地址
     p = zl+offset;
 
     /* Apply memory move when necessary and update tail offset. */
+    // 接下来开始挪动p两端的位置并把新的节点插入
     if (p[0] != ZIP_END) {
         /* Subtract one because of the ZIP_END bytes */
+        // 把p位置之后的元素都往后移动reqlen个位置，空出reqlen长度的内存给新节点使用
         memmove(p+reqlen,p-nextdiff,curlen-offset-1+nextdiff);
 
         /* Encode this entry's raw length in the next entry. */
+        // 将新节点的长度设置到后一个节点之中
         if (forcelarge)
+            // 如果满足我们前面计算nextdiff的所设定的不缩小条件则强行保留5个char来存储新节点的长度
             zipStorePrevEntryLengthLarge(p+reqlen,reqlen);
         else
             zipStorePrevEntryLength(p+reqlen,reqlen);
 
         /* Update offset for tail */
+        // 设置zl头部中尾部元素偏移量
         ZIPLIST_TAIL_OFFSET(zl) =
             intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))+reqlen);
 
         /* When the tail contains more than one entry, we need to take
          * "nextdiff" in account as well. Otherwise, a change in the
          * size of prevlen doesn't have an effect on the *tail* offset. */
+        // 节约变量，直接使用tail作为节点
         zipEntry(p+reqlen, &tail);
         if (p[reqlen+tail.headersize+tail.len] != ZIP_END) {
             ZIPLIST_TAIL_OFFSET(zl) =
@@ -975,6 +1042,7 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
         }
     } else {
         /* This element will be the new tail. */
+        // 如果本身要插到尾部则元素偏移位置就是头部到插入位置p的
         ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(p-zl);
     }
 
