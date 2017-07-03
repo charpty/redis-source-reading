@@ -423,11 +423,11 @@ unsigned int zipStoreEntryEncoding(unsigned char *p, unsigned char encoding, uns
  *      2. 01xxxxxx xxxxxxxx 共2位: 使用14位来记录长度，最大值位2^14 - 1
  *      3. 10xxxxxx xxxxxxxx...共5位: 使用32位来记录长度(带标记位的char整个舍弃不用)，最大值2^32 - 1
  *  3、编码大于1100 0000共规定了6种类型，长度均采用1个字符表示，每种类型数据的存储格式也各不相同
- *      4. 1100 0000: 数据长度为192(1100 0000,就是本身),data指针存储数据格式为16字节整型
- *      5. 1101 0000: 数据长度为208，data指针存储数据格式为32字节整型
- *      6. 1110 0000: 数据长度为224，data指针存储数据格式为64字节整型
- *      7. 1111 0000: 数据长度为240，data指针存储数据格式为3字节整型
- *      8. 1111 1110: 数据长度为254，data指针存储数据格式为1字节整型
+ *      4. 1100 0000: data指针存储数据格式为16字节整型
+ *      5. 1101 0000: data指针存储数据格式为32字节整型
+ *      6. 1110 0000: data指针存储数据格式为64字节整型
+ *      7. 1111 0000: data指针存储数据格式为3字节整型
+ *      8. 1111 1110: data指针存储数据格式为1字节整型
  *      9. 1111 dddd: 特殊情况，后4位表示真实数据，0～12，也就是dddd的值减去1就是真实值
  *                    之所以减1是因为较小的数字肯定是从0开始，但1111 0000又和第6点冲突
  *                    最大只到1101因为1110又和第8点冲突
@@ -1048,6 +1048,9 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
 
     /* When nextdiff != 0, the raw length of the next entry has changed, so
      * we need to cascade the update throughout the ziplist */
+    // 如果下个节点的长度有所变化(因为存储当前节点的长度所占内存变化了)
+    // 那意味着因为下个节点长度变化，下下个节点存储下个节点长度的内存也发生了变化又导致下下个节点的长度变化
+    // 这改变是个蝴蝶效应，所以需要逐一遍历修改
     if (nextdiff != 0) {
         offset = p-zl;
         zl = __ziplistCascadeUpdate(zl,p+reqlen);
@@ -1055,13 +1058,18 @@ unsigned char *__ziplistInsert(unsigned char *zl, unsigned char *p, unsigned cha
     }
 
     /* Write the entry */
+    // 将前一个节点的长度存入该节点首部
     p += zipStorePrevEntryLength(p,prevlen);
+    // 存储该节点数据编码方式和长度
     p += zipStoreEntryEncoding(p,encoding,slen);
     if (ZIP_IS_STR(encoding)) {
+        // 如果是字符编码则直接拷贝
         memcpy(p,s,slen);
     } else {
+        // 整型编码则存储对应整型
         zipSaveInteger(p,value,encoding);
     }
+    // 将列表的长度加1
     ZIPLIST_INCR_LENGTH(zl,1);
     return zl;
 }
