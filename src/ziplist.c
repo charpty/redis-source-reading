@@ -798,12 +798,24 @@ unsigned char *ziplistResize(unsigned char *zl, unsigned int len) {
  *
  * The pointer "p" points to the first entry that does NOT need to be
  * updated, i.e. consecutive fields MAY need an update. */
+/*
+ * 由于各个节点都存储了前一个节点的长度(prevrawlen)，并且prevrawlen的长度也是动态的，根据前一个节点长度的不同而不同
+ * 所以需要从第一个被改变的地方开始逐个往后扫描并修改长度, 直到不需要修改为止(长度的变化不需要修改存储内存)
+ *
+ * 参数列表
+ *      1、zl: 待操作的列表
+ *      2、p: 要开始改变长度的位置
+ *
+ * 返回值
+ *      新的列表首地址，因为过程中可能需要重分配列表内存
+ *
+ */
 unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
     size_t curlen = intrev32ifbe(ZIPLIST_BYTES(zl)), rawlen, rawlensize;
     size_t offset, noffset, extra;
     unsigned char *np;
     zlentry cur, next;
-
+    // 遍历到列表尾为止
     while (p[0] != ZIP_END) {
         zipEntry(p, &cur);
         rawlen = cur.headersize + cur.len;
