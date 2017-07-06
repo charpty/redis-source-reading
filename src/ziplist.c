@@ -817,21 +817,28 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
     zlentry cur, next;
     // 遍历到列表尾为止
     while (p[0] != ZIP_END) {
+        // 获取当前节点的长度，以及存储该长度所需的内存
         zipEntry(p, &cur);
         rawlen = cur.headersize + cur.len;
         rawlensize = zipStorePrevEntryLength(NULL,rawlen);
 
         /* Abort if there is no next entry. */
+        // 当前节点是列表倒数第二个节点
         if (p[rawlen] == ZIP_END) break;
+        // 获取下个节点的信息
         zipEntry(p+rawlen, &next);
 
+        // 如果当前节点的长度变化没有引起下一个节点的prevrawlen的存储长度变化则终止
         /* Abort when "prevlen" has not changed. */
         if (next.prevrawlen == rawlen) break;
 
         if (next.prevrawlensize < rawlensize) {
+            // 需要扩充下个节点的prevrawlen元素的内存占用空间来存储当前节点的长度
             /* The "prevlen" field of "next" needs more bytes to hold
              * the raw length of "cur". */
+            // 因为重新分配内存后节点首部指针p本身有可能发生变化，所以要提前记录offset方便后续算出p
             offset = p-zl;
+            // 额外还需要多少内存并重新分配列表空间
             extra = rawlensize-next.prevrawlensize;
             zl = ziplistResize(zl,curlen+extra);
             p = zl+offset;
@@ -841,30 +848,38 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
             noffset = np-zl;
 
             /* Update tail offset when next element is not the tail element. */
+            // 如果发生了变化且不是列表尾部则需要更新尾部偏移值
             if ((zl+intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))) != np) {
                 ZIPLIST_TAIL_OFFSET(zl) =
                     intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))+extra);
             }
 
             /* Move the tail to the back. */
+            // 将变化的位置的元素都往后移动
             memmove(np+rawlensize,
                 np+next.prevrawlensize,
                 curlen-noffset-next.prevrawlensize-1);
             zipStorePrevEntryLength(np,rawlen);
 
             /* Advance the cursor */
+            // 因为此节点发生了变化可能导致下一节点也发生变化
+            // 继续检查是否下一节点也需要扩展
             p += rawlen;
             curlen += extra;
         } else {
             if (next.prevrawlensize > rawlensize) {
                 /* This would result in shrinking, which we want to avoid.
                  * So, set "rawlen" in the available bytes. */
+                // 如果需要的内存反而更少了则强制保留现有内存不进行缩小
+                // 仅浪费一点内存却省去了大量移动复制操作而且后续增大时也无需再扩展
                 zipStorePrevEntryLengthLarge(p+rawlen,rawlen);
             } else {
+                // 内存正好够存储仅需设置一下下一个节点的prevrawlen
                 zipStorePrevEntryLength(p+rawlen,rawlen);
             }
 
             /* Stop here, as the raw length of "next" has not changed. */
+            // 只要不是需要扩展内存来存储更长的长度值的情况则列表总内存不需要再进行任何调整
             break;
         }
     }
@@ -872,6 +887,17 @@ unsigned char *__ziplistCascadeUpdate(unsigned char *zl, unsigned char *p) {
 }
 
 /* Delete "num" entries, starting at "p". Returns pointer to the ziplist. */
+/*
+ * 从列表指定位置开始删除指定个数的节点
+ *
+ * 参数列表
+ *      1. zl: 待操作的列表
+ *      2. p: 删除开始的位置
+ *      3. num: 要删除的节点个数
+ *
+ * 返回值
+ *     新的列表指针，删除操作可能会导致列表内存重分配
+ */
 unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int num) {
     unsigned int i, totlen, deleted = 0;
     size_t offset;
@@ -879,11 +905,13 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
     zlentry first, tail;
 
     zipEntry(p, &first);
+    // 逐个算出各个节点的长度并找到最终删除截止的位置
     for (i = 0; p[0] != ZIP_END && i < num; i++) {
         p += zipRawEntryLength(p);
         deleted++;
     }
 
+    // 算出要删除的总长度
     totlen = p-first.p; /* Bytes taken by the element(s) to delete. */
     if (totlen > 0) {
         if (p[0] != ZIP_END) {
@@ -891,16 +919,22 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
              * number of bytes required compare to the current `prevrawlen`.
              * There always is room to store this, because it was previously
              * stored by an entry that is now being deleted. */
+            // 删除截止位置的下一个节点需要存储删除起始位置上一个节点的长度
+            // 这可能导致删除截止位置的下一个节点的长度发生变化
             nextdiff = zipPrevLenByteDiff(p,first.prevrawlen);
 
             /* Note that there is always space when p jumps backward: if
              * the new previous entry is large, one of the deleted elements
              * had a 5 bytes prevlen header, so there is for sure at least
              * 5 bytes free and we need just 4. */
+            // 使用删除段的内存作为删除截止位置的下一个节点的prevrawlen的内存
+            // 由于是删除操作，删除截止位置下个节点内存需要扩充时直接取删除段内存即可
+            // 如果需要缩小则将其当成删除项的一部分
             p -= nextdiff;
             zipStorePrevEntryLength(p,first.prevrawlen);
 
             /* Update offset for tail */
+            // 重新设置尾部标记偏移址,将其向前移动删除总长度个位置
             ZIPLIST_TAIL_OFFSET(zl) =
                 intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))-totlen);
 
@@ -908,21 +942,26 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
              * "nextdiff" in account as well. Otherwise, a change in the
              * size of prevlen doesn't have an effect on the *tail* offset. */
             zipEntry(p, &tail);
+            // 由于删除截止位置的下一个节点长度可能发生了变化有可能导致尾部标记不准确
+            // 不得不说每个节点存储上一个节点长度也是一件比较悲催的事情
             if (p[tail.headersize+tail.len] != ZIP_END) {
                 ZIPLIST_TAIL_OFFSET(zl) =
                    intrev32ifbe(intrev32ifbe(ZIPLIST_TAIL_OFFSET(zl))+nextdiff);
             }
 
             /* Move tail to the front of the ziplist */
+            // 将删除截止位置后的元素移动删除开始开始位置后面
             memmove(first.p,p,
                 intrev32ifbe(ZIPLIST_BYTES(zl))-(p-zl)-1);
         } else {
             /* The entire tail was deleted. No need to move memory. */
+            // 当正好是删除到尾部为止时则使用删除开始位置作为新的尾部即可
             ZIPLIST_TAIL_OFFSET(zl) =
                 intrev32ifbe((first.p-zl)-first.prevrawlen);
         }
 
         /* Resize and update length */
+        // 由于长度发生了变化所以需要重新分配列表内存空间
         offset = first.p-zl;
         zl = ziplistResize(zl, intrev32ifbe(ZIPLIST_BYTES(zl))-totlen+nextdiff);
         ZIPLIST_INCR_LENGTH(zl,-deleted);
@@ -931,6 +970,8 @@ unsigned char *__ziplistDelete(unsigned char *zl, unsigned char *p, unsigned int
         /* When nextdiff != 0, the raw length of the next entry has changed, so
          * we need to cascade the update throughout the ziplist */
         if (nextdiff != 0)
+            // 如果删除截止为止的prevrawlen的内存长度发生了变化(为了存储新的节点长度)
+            // 则这个节点往后的所有的节点都要检查是否应该发生改变来存储前个节点改变后的长度
             zl = __ziplistCascadeUpdate(zl,p);
     }
     return zl;
