@@ -288,23 +288,35 @@
 /* We use this function to receive information about a ziplist entry.
  * Note that this is not how the data is actually encoded, is just what we
  * get filled by a function in order to operate more easily. */
-//  Redis压缩队列的具体节点
+//  Redis压缩队列的抽象节点，工具型结构体，本身不代表压缩列表的任何真实数据结构
+//  之所以设置该结构体是为了方便各个函数传递值，也提高了代码可读性
+//  从这个工具型结构体可以很好的看出Redis压缩列表的结构
 typedef struct zlentry {
+    // 存储prevrawlen(前一个节点的长度)本身所需的内存
     unsigned int prevrawlensize; /* Bytes used to encode the previos entry len*/
+    // 前一个节点的长度，在Redis压缩列表节点中，它本身的长度也是动态的，总长度有1个char和5个char两种
+    // 5个char时是第一位是标志位，后4位是真实长度，所以最长也就是一个int
+    // 工具结构体当然是要简单一点，直接使用int是妥妥的够存了
     unsigned int prevrawlen;     /* Previous entry len. */
+    // 存储len(该节点长度)本身所需的内存
     unsigned int lensize;        /* Bytes used to encode this entry type/len.
                                     For example strings have a 1, 2 or 5 bytes
                                     header. Integers always use a single byte.*/
+    // 该节点的长度，它本身的长度也是动态的，分为9种情况
+    // 和prevrawlen一样，最长也就是一个int，所以工具型结构体也是用个int来存就行了
     unsigned int len;            /* Bytes used to represent the actual entry.
                                     For strings this is just the string length
                                     while for integers it is 1, 2, 3, 4, 8 or
                                     0 (for 4 bit immediate) depending on the
                                     number range. */
+    // 节点头部长度，只是为了取数方便，是prevrawlensize和lensize的长度总和
     unsigned int headersize;     /* prevrawlensize + lensize. */
+    // 该节点的编码类型
     unsigned char encoding;      /* Set to ZIP_STR_* or ZIP_INT_* depending on
                                     the entry encoding. However for 4 bits
                                     immediate integers this can assume a range
                                     of values and must be range-checked. */
+    // 节点的起始位置指针
     unsigned char *p;            /* Pointer to the very start of the entry, that
                                     is, this points to prev-entry-len field. */
 } zlentry;
@@ -330,6 +342,15 @@ typedef struct zlentry {
 } while(0)
 
 /* Return bytes needed to store integer encoded by 'encoding'. */
+/*
+ * 根据节点的编码类型具体节点的实际数据长度所占内存大小
+ *
+ * 参数列表
+ *      1. encoding: 该节点的编码类型
+ *
+ * 返回值
+ *      节点实际长度所占内存大小
+ */
 unsigned int zipIntSize(unsigned char encoding) {
     switch(encoding) {
     case ZIP_INT_8B:  return 1;
@@ -338,6 +359,7 @@ unsigned int zipIntSize(unsigned char encoding) {
     case ZIP_INT_32B: return 4;
     case ZIP_INT_64B: return 8;
     }
+    // encoding所在char本身就包含了数据(数据只能为整数0~12)，此时则不需要额外的内存来存储数据了
     if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX)
         return 0; /* 4 bit immediate */
     panic("Invalid integer encoding 0x%02X", encoding);
@@ -654,10 +676,20 @@ int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, un
 }
 
 /* Store integer 'value' at 'p', encoded as 'encoding' */
+/*
+ * 将整型数据设置到节点的数据段中
+ *
+ * 参数列表
+ *      1. p: 节点实际数据段的首部指针
+ *      2. value: 要设置的整型值
+ *      3. encoding: 该节点的编码类型
+ *
+ */
 void zipSaveInteger(unsigned char *p, int64_t value, unsigned char encoding) {
     int16_t i16;
     int32_t i32;
     int64_t i64;
+    // 根据不同的编码类型设置节点真实数据
     if (encoding == ZIP_INT_8B) {
         ((int8_t*)p)[0] = (int8_t)value;
     } else if (encoding == ZIP_INT_16B) {
@@ -678,6 +710,7 @@ void zipSaveInteger(unsigned char *p, int64_t value, unsigned char encoding) {
         memrev64ifbe(p);
     } else if (encoding >= ZIP_INT_IMM_MIN && encoding <= ZIP_INT_IMM_MAX) {
         /* Nothing to do, the value is stored in the encoding itself. */
+        // 该情况下节点的编码类型本身就包含了节点的真实数据，无需设置
     } else {
         assert(NULL);
     }
@@ -1320,19 +1353,36 @@ unsigned char *ziplistPrev(unsigned char *zl, unsigned char *p) {
  * on the encoding of the entry. '*sstr' is always set to NULL to be able
  * to find out whether the string pointer or the integer value was set.
  * Return 0 if 'p' points to the end of the ziplist, 1 otherwise. */
+/*
+ * 获取p节点的实际数据的值并设置到sstr或sval中，如何设置取决于节点的编码类型
+ *
+ * 参数列表
+ *      1. p: 指定的节点，该节点为列表尾或者指针无效时则告诉调用者获取节点值失败
+ *      2. sstr: 出参字符串，如果该节点是以字符串形式编码的话则会设置该出参
+ *      3. slen: 出参字符串长度
+ *      4. sval: 出参整型，如果该节点是以整型编码(任何一种整型编码)则会设置该出参为节点实际数据值
+ *
+ * 返回值
+ *      返回0代表指定的节点无效，返回1则代表节点有效并成功获取到其实际数据值
+ */
 unsigned int ziplistGet(unsigned char *p, unsigned char **sstr, unsigned int *slen, long long *sval) {
     zlentry entry;
     if (p == NULL || p[0] == ZIP_END) return 0;
+    // 调用者是以sstr有没有被设置值来判断该节点是以整型编码还是字符串编码的
+    // 为了防止出现歧义所以强制将sstr先指向空
     if (sstr) *sstr = NULL;
 
+    // 将节点p的属性设置到工具结构体中，这样处理起来方便的多
     zipEntry(p, &entry);
     if (ZIP_IS_STR(entry.encoding)) {
+        // 如果是以字符串编码则设置字符串出参
         if (sstr) {
             *slen = entry.len;
             *sstr = p+entry.headersize;
         }
     } else {
         if (sval) {
+            // 取出实际的整型数据
             *sval = zipLoadInteger(p+entry.headersize,entry.encoding);
         }
     }
