@@ -41,16 +41,32 @@
  * recompress: 1 bit, bool, true if node is temporarry decompressed for usage.
  * attempted_compress: 1 bit, boolean, used for verifying during testing.
  * extra: 12 bits, free for future use; pads out the remainder of 32 bits */
+/*
+ * 快速列表的具体节点
+ */
 typedef struct quicklistNode {
+    // 前一个节点
     struct quicklistNode *prev;
+    // 后一个节点
     struct quicklistNode *next;
+    // ziplist首部指针，各个节点的实际数据项存储在ziplist中(连续内存空间的压缩列表)
     unsigned char *zl;
+    // ziplist占用的总内存大小，不论压缩与否都是存储实际的总内存大小
     unsigned int sz;             /* ziplist size in bytes */
+    // ziplist的数据项的个数
     unsigned int count : 16;     /* count of items in ziplist */
+    // 该节点是否被压缩过了，1代表没压缩，2代表使用LZF算法压缩过了
+    // 可能以后会有别的压缩算法，目前则只有这一种压缩算法
     unsigned int encoding : 2;   /* RAW==1 or LZF==2 */
+    // 该节点使用何种方式来存储数据，1代表没存储数据，2代表使用ziplist存储数据
+    // 这个节点目前看来都是2，即使用ziplist来存储数据，后续可能会有别的方式
     unsigned int container : 2;  /* NONE==1 or ZIPLIST==2 */
+    // 这个节点是否需要重新压缩？
+    // 某些情况下需要临时解压下这个节点，有这个标记则会找机会再重新进行压缩
     unsigned int recompress : 1; /* was this node previous compressed? */
+    // 节点数据不能压缩？
     unsigned int attempted_compress : 1; /* node can't compress; too small */
+    // 只是一个int正好剩下的内存，目前还没使用上，可以认为是扩展字段
     unsigned int extra : 10; /* more bits to steal for future usage */
 } quicklistNode;
 
@@ -70,15 +86,23 @@ typedef struct quicklistLZF {
  * 'compress' is: -1 if compression disabled, otherwise it's the number
  *                of quicklistNodes to leave uncompressed at ends of quicklist.
  * 'fill' is the user-requested (or default) fill factor. */
+// 和adlist一样，虽然quicklistNode本身就可以构成链表，但是使用quicklist来操作链表会方便很多
 typedef struct quicklist {
+    // 首部节点
     quicklistNode *head;
+    // 尾部节点
     quicklistNode *tail;
+    // 不是quicklistNode的个数，而是各个节点中所含的所有ziplist中的zlentry的个数
     unsigned long count;        /* total count of all entries in all ziplists */
+    // quicklistNode的个数
     unsigned int len;           /* number of quicklistNodes */
+    // 每个节点中的实际数据节点的个数(目前都是用ziplist存储所以也就是ziplist中zlentry的个数)
     int fill : 16;              /* fill factor for individual nodes */
+    // 最大压缩深度
     unsigned int compress : 16; /* depth of end nodes not to compress;0=off */
 } quicklist;
 
+// 和adlist类似的链表迭代器，但是结合了ziplist的特性
 typedef struct quicklistIter {
     const quicklist *quicklist;
     quicklistNode *current;
