@@ -111,12 +111,21 @@ typedef struct quicklistIter {
     int direction;
 } quicklistIter;
 
+// 快速列表节点表示的工具型结构体
+// 和ziplist的zlenty类似，一切为了操作方便
 typedef struct quicklistEntry {
+    // 快速链表
     const quicklist *quicklist;
+    // 对应的节点
     quicklistNode *node;
+    // 在ziplist中的实际的数据节点的首部指针
     unsigned char *zi;
+    // 如果实际数据是字符串编码类型则值设置在该属性中
     unsigned char *value;
+    // 如果实际数据是整型编码类型则值设置在该属性中
     long long longval;
+    // 不同使用场景下表示意义稍有不同
+    // 获取指定节点实际数据值时表示字符串编码情况下字符串的长度
     unsigned int sz;
     int offset;
 } quicklistEntry;

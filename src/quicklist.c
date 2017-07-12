@@ -91,6 +91,12 @@ static const size_t optimization_level[] = {4096, 8192, 16384, 32768, 65536};
 
 /* Create a new quicklist.
  * Free with quicklistRelease(). */
+/*
+ * 创建一个快速链表
+ *
+ * 返回值
+ *      新的快速链表的指针
+ */
 quicklist *quicklistCreate(void) {
     struct quicklist *quicklist;
 
@@ -99,6 +105,7 @@ quicklist *quicklistCreate(void) {
     quicklist->len = 0;
     quicklist->count = 0;
     quicklist->compress = 0;
+    // -2代表ziplist的大小不超过8kb
     quicklist->fill = -2;
     return quicklist;
 }
@@ -123,12 +130,30 @@ void quicklistSetFill(quicklist *quicklist, int fill) {
     quicklist->fill = fill;
 }
 
+/*
+ * 设置快速链表的ziplist长度最大值和压缩深度
+ *
+ * 参数列表
+ *      1. quicklist: 待设置的快速链表
+ *      2. fill: ziplist长度最大值对应编码
+ *      3. depth: 压缩深度，指ziplist两头共有多少个节点不需要压缩
+ */
 void quicklistSetOptions(quicklist *quicklist, int fill, int depth) {
     quicklistSetFill(quicklist, fill);
     quicklistSetCompressDepth(quicklist, depth);
 }
 
 /* Create a new quicklist with some default parameters. */
+/*
+ * 创建一个快速链表
+ *
+ * 参数列表
+ *      1. fill: ziplist长度最大值,默认-2代表最长为8kb
+ *      2. compress: 压缩深度，指ziplist两头共有多少个节点不需要压缩
+ *
+ * 返回值
+ *      新的快速链表的指针
+ */
 quicklist *quicklistNew(int fill, int compress) {
     quicklist *quicklist = quicklistCreate();
     quicklistSetOptions(quicklist, fill, compress);
@@ -1045,6 +1070,16 @@ int quicklistCompare(unsigned char *p1, unsigned char *p2, int p2_len) {
 
 /* Returns a quicklist iterator 'iter'. After the initialization every
  * call to quicklistNext() will return the next element of the quicklist. */
+/*
+ * 和adlist相同，获取链表的迭代器
+ *
+ * 参数列表
+ * 	1. quicklist: 待操作的链表
+ * 	2. direction: 标记从表头还是遍历还是表尾遍历,0从头开始，1从尾开始
+ *
+ * 返回值
+ * 	链表迭代器，是迭代函数的入参
+ */
 quicklistIter *quicklistGetIterator(const quicklist *quicklist, int direction) {
     quicklistIter *iter;
 
@@ -1068,6 +1103,17 @@ quicklistIter *quicklistGetIterator(const quicklist *quicklist, int direction) {
 
 /* Initialize an iterator at a specific offset 'idx' and make the iterator
  * return nodes in 'direction' direction. */
+/*
+ * 创建一个从链表指定位置开始的迭代器
+ *
+ * 参数列表
+ *      1. quicklist: 待操作的链表
+ *      2. direction: 迭代方向
+ *      3. idx: 从哪个位置开始
+ *
+ * 返回值
+ *      链表迭代器，是链表迭代函数的入参
+ */
 quicklistIter *quicklistGetIteratorAtIdx(const quicklist *quicklist,
                                          const int direction,
                                          const long long idx) {
@@ -1222,17 +1268,33 @@ quicklist *quicklistDup(quicklist *orig) {
  *
  * Returns 1 if element found
  * Returns 0 if element not found */
+/*
+ * 获取指定位置的节点
+ *
+ * 参数列表
+ *      1. quicklist: 待操作的链表
+ *      2. idx: 节点位置序号，大于0表示从链表头开始索引，小于代表从链表尾部开始索引
+ *              注意这个序号是所有ziplist的所有节点的序号，不是quicklist节点的序号
+ *      3. entry: 出参，如果找到节点则将节点的属性设置到该entry中
+ *
+ * 返回值
+ *      返回1代表成功找到指定位置节点，否则返回0
+ */
 int quicklistIndex(const quicklist *quicklist, const long long idx,
                    quicklistEntry *entry) {
     quicklistNode *n;
     unsigned long long accum = 0;
     unsigned long long index;
+    // 小于0从后往前搜索
     int forward = idx < 0 ? 0 : 1; /* < 0 -> reverse, 0+ -> forward */
 
+    // 这里会对entry设置一些初始值，所以必须通过该函数返回值判断获取成功失败
+    // 而不能通过entry是否设置来判断
     initEntry(entry);
     entry->quicklist = quicklist;
 
     if (!forward) {
+        // 从尾部开始遍历-1代表第1个节点(位置0),-2代表第二个节点(位置1)
         index = (-idx) - 1;
         n = quicklist->tail;
     } else {
@@ -1240,27 +1302,35 @@ int quicklistIndex(const quicklist *quicklist, const long long idx,
         n = quicklist->head;
     }
 
+    // 如果指定位置超出了链表本身长度
     if (index >= quicklist->count)
         return 0;
 
+    // 编译器和linux系统的一种优化语法糖
+    // 当条件为真的可能性很大时使用该写法可以提高执行效率
     while (likely(n)) {
+        // 这个循环只能算出想要的节点在哪个ziplist中，后续再从ziplist取出真正节点
         if ((accum + n->count) > index) {
             break;
         } else {
             D("Skipping over (%p) %u at accum %lld", (void *)n, n->count,
               accum);
+            // 每个快速列表的节点都记录了它附带的ziplist中的节点个数
             accum += n->count;
             n = forward ? n->next : n->prev;
         }
     }
 
+    // 如果没有找到指定节点则返回失败
     if (!n)
         return 0;
 
+    // 调试日志
     D("Found node: %p at accum %llu, idx %llu, sub+ %llu, sub- %llu", (void *)n,
       accum, index, index - accum, (-index) - 1 + accum);
 
     entry->node = n;
+    // 设置在当前ziplist中还要偏移多少个位置才是真正的数据节点
     if (forward) {
         /* forward = normal head-to-tail offset. */
         entry->offset = index - accum;
@@ -1270,8 +1340,13 @@ int quicklistIndex(const quicklist *quicklist, const long long idx,
         entry->offset = (-index) - 1 + accum;
     }
 
+    // 解压当前节点的ziplist，由于是将该节点给调用者使用，所以解压之后不再重新压缩
+    // 由调用者根据重压缩标志决定是否需要再压缩
     quicklistDecompressNodeForUse(entry->node);
+    // 获取实际的数据节点首部指针
     entry->zi = ziplistIndex(entry->node->zl, entry->offset);
+    // 到此已找到数据节点，现把数据节点中的实际数据取出并根据编码类型设置不同属性
+    // 值得注意的是调用者通过entry的value属性是否有值来判断实际数据是否是字符串编码
     ziplistGet(entry->zi, &entry->value, &entry->sz, &entry->longval);
     /* The caller will use our result, so we don't re-compress here.
      * The caller can recompress or delete the node as needed. */

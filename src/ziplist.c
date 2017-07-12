@@ -1284,22 +1284,38 @@ unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int sle
 /* Returns an offset to use for iterating with ziplistNext. When the given
  * index is negative, the list is traversed back to front. When the list
  * doesn't contain an element at the provided index, NULL is returned. */
+/*
+ * 从ziplist中获取指定位置的实际数据节点
+ *
+ * 参数列表
+ *      1. zl: 压缩列表ziplist的首部指针
+ *      2. index: 节点在ziplist中的位置索引
+ *
+ * 返回值
+ *      真实数据节点的节点首部指针
+ */
 unsigned char *ziplistIndex(unsigned char *zl, int index) {
     unsigned char *p;
     unsigned int prevlensize, prevlen = 0;
     if (index < 0) {
+        // 从尾部开始遍历
         index = (-index)-1;
         p = ZIPLIST_ENTRY_TAIL(zl);
+        // 如果不满足这个条件则说明整个ziplist是空的，没有数据节点
         if (p[0] != ZIP_END) {
             ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
             while (prevlen > 0 && index--) {
                 p -= prevlen;
+                // 每次解析出当前节点存储的前一个节点的长度值
+                // p往前移动这个长度值就是前一个节点的起始位置
                 ZIP_DECODE_PREVLEN(p, prevlensize, prevlen);
             }
         }
     } else {
+        // 从头部开始遍历
         p = ZIPLIST_ENTRY_HEAD(zl);
         while (p[0] != ZIP_END && index--) {
+            // 取出当前节点的长度，p向后移动该长度就是下一个节点的起始位置
             p += zipRawEntryLength(p);
         }
     }
