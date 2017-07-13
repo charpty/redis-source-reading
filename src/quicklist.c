@@ -502,8 +502,20 @@ REDIS_STATIC int _quicklistNodeAllowMerge(const quicklistNode *a,
  *
  * Returns 0 if used existing head.
  * Returns 1 if new head created. */
+/*
+ * 在链表的首部添加一个节点
+ *
+ * 参数列表
+ *      1. quicklist: 待操作的快速链表
+ *      2. value: 待插入的值
+ *      3. sz: 值的内存长度
+ *
+ * 返回值
+ *      返回1代表创建了一个新的节点，返回0代表使用了既有的节点
+ */
 int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) {
     quicklistNode *orig_head = quicklist->head;
+    // likely是条件大概率为真时的语法优化写法
     if (likely(
             _quicklistNodeAllowInsert(quicklist->head, quicklist->fill, sz))) {
         quicklist->head->zl =
@@ -1354,36 +1366,49 @@ int quicklistIndex(const quicklist *quicklist, const long long idx,
 }
 
 /* Rotate quicklist by moving the tail element to the head. */
+/*
+ * 将快速的尾部节点移动到首部
+ *
+ * 参数列表
+ *      1. quicklist: 待操作的快速链表
+ */
 void quicklistRotate(quicklist *quicklist) {
     if (quicklist->count <= 1)
         return;
 
     /* First, get the tail entry */
+    // 获取最后一个节点包含的ziplist的最后一个元素
     unsigned char *p = ziplistIndex(quicklist->tail->zl, -1);
     unsigned char *value;
     long long longval;
     unsigned int sz;
     char longstr[32] = {0};
+    // 取出数据节点对应的真实数据值
     ziplistGet(p, &value, &sz, &longval);
 
     /* If value found is NULL, then ziplistGet populated longval instead */
+    // 真实数据有两种编码方式，value被设置则说明是字符串编码方式否则是整型编码方式
     if (!value) {
         /* Write the longval as a string so we can re-add it */
+        // 整型编码的话也将其转换为字符串方便操作
         sz = ll2string(longstr, sizeof(longstr), longval);
         value = (unsigned char *)longstr;
     }
 
     /* Add tail entry to head (must happen before tail is deleted). */
+    // 把值插入到链表头部
     quicklistPushHead(quicklist, value, sz);
 
     /* If quicklist has only one node, the head ziplist is also the
      * tail ziplist and PushHead() could have reallocated our single ziplist,
      * which would make our pre-existing 'p' unusable. */
     if (quicklist->len == 1) {
+        // 如果正好链表仅有一个元素，插入节点时会导致列表内存重新申请
         p = ziplistIndex(quicklist->tail->zl, -1);
     }
 
     /* Remove tail entry. */
+    // 移除尾部节点
     quicklistDelIndex(quicklist, quicklist->tail, &p);
 }
 
