@@ -104,10 +104,15 @@ typedef struct quicklist {
 
 // 和adlist类似的链表迭代器，但是结合了ziplist的特性
 typedef struct quicklistIter {
+    // 正在遍历的快速链表
     const quicklist *quicklist;
+    // 当前所在快速链表节点
     quicklistNode *current;
+    // 迭代器当前真实数据节点的首部指针
     unsigned char *zi;
+    // 当前数据节点在当前ziplist中的偏移量
     long offset; /* offset in current ziplist */
+    // 迭代方向 0 代表从前往后 1反之
     int direction;
 } quicklistIter;
 

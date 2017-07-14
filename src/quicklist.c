@@ -174,6 +174,15 @@ REDIS_STATIC quicklistNode *quicklistCreateNode(void) {
 }
 
 /* Return cached quicklist count */
+/*
+ * 获取链表中的数据节点的总个数
+ *
+ * 参数列表
+ *      1. ql: 指定的链表
+ *
+ * 返回值
+ *      链表中实际数据节点的个数
+ */
 unsigned int quicklistCount(const quicklist *ql) { return ql->count; }
 
 /* Free entire quicklist. */
@@ -1172,17 +1181,32 @@ void quicklistReleaseIterator(quicklistIter *iter) {
  * Returns 0 when iteration is complete or if iteration not possible.
  * If return value is 0, the contents of 'entry' are not valid.
  */
+/*
+ * 获取快速链表的下一个节点
+ *
+ * 参数列表
+ *      1. iter: 链表迭代器，可以通过quicklistGetIterator()函数获得
+ *      2. entry: 出参，如果获取到下一个节点则设置属性到该工具型结构体中
+ *
+ * 返回值
+ *
+ */
 int quicklistNext(quicklistIter *iter, quicklistEntry *entry) {
+    // 重置出参entry的属性值
     initEntry(entry);
 
+    // 如果迭代器无效则返回
     if (!iter) {
         D("Returning because no iter!");
         return 0;
     }
 
+    // 当前遍历的链表是肯定不变的
     entry->quicklist = iter->quicklist;
+    // 当前遍历的快速链表节点也大概率不会改变
     entry->node = iter->current;
 
+    // 当前已遍历完毕
     if (!iter->current) {
         D("Returning because current node is NULL")
         return 0;
@@ -1192,11 +1216,17 @@ int quicklistNext(quicklistIter *iter, quicklistEntry *entry) {
     int offset_update = 0;
 
     if (!iter->zi) {
+        // 如果没有还未获取到ziplist的具体数据节点则使用偏移址获取
+        // 发生在两个快速链表节点切换时，也就是换到下一个ziplist时
         /* If !zi, use current index. */
+        // 首先需要将新的ziplist解压
         quicklistDecompressNodeForUse(iter->current);
+        // 之后获取到到指定真实数据节点
         iter->zi = ziplistIndex(iter->current->zl, iter->offset);
     } else {
         /* else, use existing iterator offset and get prev/next as necessary. */
+        // 如果没有切换ziplist那就在现有的ziplist中通过ziplist节点特性寻找下一个数据节点
+        // ziplist中的节点记录了上一个节点的长度和当前节点的长度所以既可以往前遍历也可以往后遍历
         if (iter->direction == AL_START_HEAD) {
             nextFn = ziplistNext;
             offset_update = 1;
