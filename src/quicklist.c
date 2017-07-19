@@ -1451,6 +1451,20 @@ void quicklistRotate(quicklist *quicklist) {
  * Return value of 0 means no elements available.
  * Return value of 1 means check 'data' and 'sval' for values.
  * If 'data' is set, use 'data' and 'sz'.  Otherwise, use 'sval'. */
+/*
+ * 弹出快速链表首部或尾部真实数据节点并将其数据值设置到出参中
+ *
+ * 参数列表
+ *      1. quicklist: 待操作的快速链表
+ *      2. where: 要弹出首部元素还是尾部元素, 0代表首部
+ *      3. data: 出参，实际数据值指针，当数据编码类型为字符串时该值会被设置
+ *      4. sz: 出参，实际数据值长度，指定出参data的长度
+ *      5. sval: 出参，当数据的编码类型为整型时该值会被设置
+ *      6. saver: 数据存储到堆的函数，该函数指针作用是拷贝一份字符串编码类型的数据值
+ *
+ * 返回值
+ *      返回1表示成功找到并弹出元素，返回0表示无有效节点
+ */
 int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
                        unsigned int *sz, long long *sval,
                        void *(*saver)(unsigned char *data, unsigned int sz)) {
@@ -1458,11 +1472,14 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
     unsigned char *vstr;
     unsigned int vlen;
     long long vlong;
+    // 决定弹出首部或尾部元素
     int pos = (where == QUICKLIST_HEAD) ? 0 : -1;
 
+    // 如果当前链表已经没有任何数据节点
     if (quicklist->count == 0)
         return 0;
 
+    // 初始化值，后续会使用值是否有效来做判断，所以不能受原来的值的影响
     if (data)
         *data = NULL;
     if (sz)
@@ -1471,6 +1488,7 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
         *sval = -123456789;
 
     quicklistNode *node;
+    // 找到数据节点第一步，先找到数据节点所属的快速链表节点
     if (where == QUICKLIST_HEAD && quicklist->head) {
         node = quicklist->head;
     } else if (where == QUICKLIST_TAIL && quicklist->tail) {
@@ -1479,8 +1497,11 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
         return 0;
     }
 
+    // 找到指定的数据节点
     p = ziplistIndex(node->zl, pos);
+    // 获取数据节点值
     if (ziplistGet(p, &vstr, &vlen, &vlong)) {
+        // 根据不同的数据值编码类型设置出参
         if (vstr) {
             if (data)
                 *data = saver(vstr, vlen);
@@ -1492,6 +1513,7 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
             if (sval)
                 *sval = vlong;
         }
+        // 删除值获取完毕的节点
         quicklistDelIndex(quicklist, node, &p);
         return 1;
     }
@@ -1499,6 +1521,16 @@ int quicklistPopCustom(quicklist *quicklist, int where, unsigned char **data,
 }
 
 /* Return a malloc'd copy of data passed in */
+/*
+ * 数据存储到堆区函数，用作函数指针值
+ *
+ * 参数列表
+ *      1. data: 要拷贝到堆区中的数据
+ *      2. sz: 数据的长度，由于data并非一个标准C字符串所以需要指定长度
+ *
+ * 返回值
+ *      该值所存储的堆区地址
+ */
 REDIS_STATIC void *_quicklistSaver(unsigned char *data, unsigned int sz) {
     unsigned char *vstr;
     if (data) {
@@ -1512,6 +1544,9 @@ REDIS_STATIC void *_quicklistSaver(unsigned char *data, unsigned int sz) {
 /* Default pop function
  *
  * Returns malloc'd value from quicklist */
+/*
+ *
+ */
 int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
                  unsigned int *sz, long long *slong) {
     unsigned char *vstr;
