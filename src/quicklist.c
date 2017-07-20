@@ -93,6 +93,7 @@ static const size_t optimization_level[] = {4096, 8192, 16384, 32768, 65536};
  * Free with quicklistRelease(). */
 /*
  * 创建一个快速链表
+ * 当使用LPUSH创建List时会调用该函数
  *
  * 返回值
  *      新的快速链表的指针
@@ -1545,7 +1546,17 @@ REDIS_STATIC void *_quicklistSaver(unsigned char *data, unsigned int sz) {
  *
  * Returns malloc'd value from quicklist */
 /*
+ * 弹出快速链表首部或尾部真实数据节点并将其数据值设置到出参中
  *
+ * 参数列表
+ *      1. quicklist: 待操作的快速链表
+ *      2. where: 要弹出首部元素还是尾部元素, 0代表首部
+ *      3. data: 出参，实际数据值指针，当数据编码类型为字符串时该值会被设置
+ *      4. sz: 出参，实际数据值长度，指定出参data的长度
+ *      5. slong: 出参，当数据的编码类型为整型时该值会被设置
+ *
+ * 返回值
+ *      返回1表示成功找到并弹出元素，返回0表示无有效节点
  */
 int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
                  unsigned int *sz, long long *slong) {
@@ -1554,6 +1565,7 @@ int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
     long long vlong;
     if (quicklist->count == 0)
         return 0;
+    // 由于不想改变本函数出参的原始值，所以此处没有直接使用本函数的出参
     int ret = quicklistPopCustom(quicklist, where, &vstr, &vlen, &vlong,
                                  _quicklistSaver);
     if (data)

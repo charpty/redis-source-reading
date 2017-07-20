@@ -179,6 +179,11 @@ robj *dupStringObject(const robj *o) {
     }
 }
 
+/*
+ * 创建快速链表对象, 也就是最长使用的List
+ * 当使用LPUSH命令创建一个List时会调用此方法
+ *
+ */
 robj *createQuicklistObject(void) {
     quicklist *l = quicklistCreate();
     robj *o = createObject(OBJ_LIST,l);

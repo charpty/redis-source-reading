@@ -1519,10 +1519,20 @@ int RM_StringTruncate(RedisModuleKey *key, size_t newlen) {
  * If the key pointer is about an empty key opened for writing, the key
  * is created. On error (key opened for read-only operations or of the wrong
  * type) REDISMODULE_ERR is returned, otherwise REDISMODULE_OK is returned. */
+/*
+ * LPUSH命令的实现
+ * 将元素加入到一个Redis List集合中(快速链表quicklist)，如果该key的List不存在则会创建一个List
+ * 当key存在确不是List类型时则会抛出类型不符合错误
+ *
+ */
 int RM_ListPush(RedisModuleKey *key, int where, RedisModuleString *ele) {
+    // 如果对应的key是只读的则会返回键值不可写错误
     if (!(key->mode & REDISMODULE_WRITE)) return REDISMODULE_ERR;
+    // 如果存在key但是类型不是List则会返回类型不符合错误
     if (key->value && key->value->type != OBJ_LIST) return REDISMODULE_ERR;
+    // 如果指定key不存在则创建一个quicklist类型的对象
     if (key->value == NULL) moduleCreateEmptyKey(key,REDISMODULE_KEYTYPE_LIST);
+    // 将具体的值存入List值
     listTypePush(key->value, ele,
         (where == REDISMODULE_LIST_HEAD) ? QUICKLIST_HEAD : QUICKLIST_TAIL);
     return REDISMODULE_OK;
@@ -3000,7 +3010,7 @@ double RM_LoadDouble(RedisModuleIO *io) {
     return value;
 }
 
-/* In the context of the rdb_save method of a module data type, saves a float 
+/* In the context of the rdb_save method of a module data type, saves a float
  * value to the RDB file. The float can be a valid number, a NaN or infinity.
  * It is possible to load back the value with RedisModule_LoadFloat(). */
 void RM_SaveFloat(RedisModuleIO *io, float value) {
