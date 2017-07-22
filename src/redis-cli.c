@@ -218,6 +218,9 @@ typedef struct {
 static helpEntry *helpEntries;
 static int helpEntriesLen;
 
+/*
+ * 初始化redis版本信息
+ */
 static sds cliVersion(void) {
     sds version;
     version = sdscatprintf(sdsempty(), "%s", REDIS_VERSION);
@@ -232,6 +235,9 @@ static sds cliVersion(void) {
     return version;
 }
 
+/*
+ * 初始化帮助信息
+ */
 static void cliInitHelp(void) {
     int commandslen = sizeof(commandHelp)/sizeof(struct commandHelp);
     int groupslen = sizeof(commandGroups)/sizeof(char*);
@@ -1266,6 +1272,9 @@ void cliLoadPreferences(void) {
     sdsfree(rcfile);
 }
 
+/*
+ * 处理客户端命令的主逻辑
+ */
 static void repl(void) {
     sds historyfile = NULL;
     int history = 0;

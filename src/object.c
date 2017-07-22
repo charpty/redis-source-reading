@@ -191,6 +191,9 @@ robj *createQuicklistObject(void) {
     return o;
 }
 
+/*
+ *
+ */
 robj *createZiplistObject(void) {
     unsigned char *zl = ziplistNew();
     robj *o = createObject(OBJ_LIST,zl);
