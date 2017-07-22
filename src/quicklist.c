@@ -623,6 +623,16 @@ void quicklistAppendZiplist(quicklist *quicklist, unsigned char *zl) {
  * with smaller ziplist sizes than the saved RDB ziplist.
  *
  * Returns 'quicklist' argument. Frees passed-in ziplist 'zl' */
+/*
+ * 将ziplist的数据项逐一添加到指定快速链表中
+ *
+ * 参数列表
+ *      1. quicklist: 待插入的链表
+ *      2. zl: 数据项列表(ziplist), 其中的各个数据项将被逐一添加到指定快速链表
+ *
+ * 返回值
+ *      就是入参的quicklist，返回只是为了方便左联操作
+ */
 quicklist *quicklistAppendValuesFromZiplist(quicklist *quicklist,
                                             unsigned char *zl) {
     unsigned char *value;
@@ -647,6 +657,17 @@ quicklist *quicklistAppendValuesFromZiplist(quicklist *quicklist,
 /* Create new (potentially multi-node) quicklist from a single existing ziplist.
  *
  * Returns new quicklist.  Frees passed-in ziplist 'zl'. */
+/*
+ * 构造一个快速链表并设置第一个快速链表节点(包含指定的ziplist)
+ *
+ * 参数列表
+ *      1. fill: 单个快速列表节点对应的数据节点(ziplist)的最大长度
+ *      2. compress: ziplist两边压缩的真实数据项的个数
+ *      3. zl: 用于初始化该快速链表的第一个节点对应的数据节点(ziplist)
+ *
+ * 返回值
+ *      新创建的快速链表地址
+ */
 quicklist *quicklistCreateFromZiplist(int fill, int compress,
                                       unsigned char *zl) {
     return quicklistAppendValuesFromZiplist(quicklistNew(fill, compress), zl);
