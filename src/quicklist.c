@@ -81,6 +81,8 @@ static const size_t optimization_level[] = {4096, 8192, 16384, 32768, 65536};
         (e)->sz = 0;                                                           \
     } while (0)
 
+// 分支语句优化技术, 用于优化区分“大概率真”或“大概率假”的情况
+// 该写法由GCC编译器支持，可以提高CPU的执行效率
 #if __GNUC__ >= 3
 #define likely(x) __builtin_expect(!!(x), 1)
 #define unlikely(x) __builtin_expect(!!(x), 0)
@@ -187,16 +189,26 @@ REDIS_STATIC quicklistNode *quicklistCreateNode(void) {
 unsigned int quicklistCount(const quicklist *ql) { return ql->count; }
 
 /* Free entire quicklist. */
+/*
+ * 释放快速链表
+ *
+ * 参数列表
+ *      1. quicklist: 待释放的快速链表
+ *
+ */
 void quicklistRelease(quicklist *quicklist) {
     unsigned long len;
     quicklistNode *current, *next;
 
     current = quicklist->head;
     len = quicklist->len;
+    // 逐个释放快速链表节点
     while (len--) {
         next = current->next;
 
+        // 先释放快速列表节点包含的数据节点(ziplist)
         zfree(current->zl);
+        // 对于单线程来说，这里似乎必要设置count了
         quicklist->count -= current->count;
 
         zfree(current);
@@ -452,8 +464,21 @@ _quicklistNodeSizeMeetsOptimizationRequirement(const size_t sz,
 
 #define sizeMeetsSafetyLimit(sz) ((sz) <= SIZE_SAFETY_LIMIT)
 
+/*
+ * 判断当前快速链表节点是否能够再添加值
+ * fill规定了一个快速链表节点对应的数据节点(ziplist)最多能包含的真实数据个数
+ *
+ * 参数列表
+ *      1. node: 待评估的快速链表节点
+ *      2. fill: 节点对应的ziplist最多能包含的数据项个数
+ *      3. sz: 新插入的数据的长度
+ *
+ * 返回值
+ *      返回1表示还可以继续添加，返回0代表不可以
+ */
 REDIS_STATIC int _quicklistNodeAllowInsert(const quicklistNode *node,
                                            const int fill, const size_t sz) {
+    // 节点无效，大概率是不可能出现的，所以加了编译器语法优化unlikely
     if (unlikely(!node))
         return 0;
 
@@ -547,8 +572,20 @@ int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) {
  *
  * Returns 0 if used existing tail.
  * Returns 1 if new tail created. */
+/*
+ * 在链表的尾部添加一个节点
+ *
+ * 参数列表
+ *      1. quicklist: 待操作的快速链表
+ *      2. value: 待插入的值
+ *      3. sz: 值的内存长度
+ *
+ * 返回值
+ *      返回1代表创建了一个新的节点，返回0代表使用了既有的节点
+ */
 int quicklistPushTail(quicklist *quicklist, void *value, size_t sz) {
     quicklistNode *orig_tail = quicklist->tail;
+    // likely是条件大概率为真时的语法优化写法
     if (likely(
             _quicklistNodeAllowInsert(quicklist->tail, quicklist->fill, sz))) {
         quicklist->tail->zl =
