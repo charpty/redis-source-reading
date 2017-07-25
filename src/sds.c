@@ -1029,6 +1029,13 @@ cleanup:
 }
 
 /* Free the result returned by sdssplitlen(), or do nothing if 'tokens' is NULL. */
+/*
+ * 释放指定SDS数组内存
+ *
+ * 参数列表
+ *      1. tokens: 待释放的SDS数组
+ *      2. count: 数据元素的个数
+ */
 void sdsfreesplitres(sds *tokens, int count) {
     if (!tokens) return;
     while(count--)
@@ -1125,6 +1132,16 @@ int hex_digit_to_int(char c) {
  * input string is empty, or NULL if the input contains unbalanced
  * quotes or closed quotes followed by non space characters
  * as in: "foo"bar or "foo'
+ */
+/*
+ * 将文本解析为一组参数值
+ *
+ * 参数列表
+ *      1. line: 文本行
+ *      2. argc: 出参，解析出来的参数的个数
+ *
+ * 返回值
+ *      一组字符串参数
  */
 sds *sdssplitargs(const char *line, int *argc) {
     const char *p = line;

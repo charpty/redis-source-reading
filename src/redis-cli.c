@@ -1259,6 +1259,9 @@ static sds *cliSplitArgs(char *line, int *argc) {
 /* Set the CLI preferences. This function is invoked when an interactive
  * ":command" is called, or when reading ~/.redisclirc file, in order to
  * set user preferences. */
+/*
+ *
+ */
 void cliSetPreferences(char **argv, int argc, int interactive) {
     if (!strcasecmp(argv[0],":set") && argc >= 2) {
         if (!strcasecmp(argv[1],"hints")) pref.hints = 1;
@@ -1286,16 +1289,19 @@ void cliLoadPreferences(void) {
     char buf[1024];
 
     if (fp) {
+        // 为什么不一次性读全然后再操作呢？
         while(fgets(buf,sizeof(buf),fp) != NULL) {
             sds *argv;
             int argc;
 
             argv = sdssplitargs(buf,&argc);
             if (argc > 0) cliSetPreferences(argv,argc,0);
+            // 释放参数数组所占内存
             sdsfreesplitres(argv,argc);
         }
         fclose(fp);
     }
+    // 释放存放文件全路径的SDS所占内存
     sdsfree(rcfile);
 }
 
