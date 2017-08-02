@@ -51,6 +51,14 @@
 #include <assert.h>
 #endif
 
+/*
+ * Redis的hash表的实现
+ *
+ * 简单看了下也是和JDK7之前版本实现类似
+ * 采用数组 + 链表的形式实现，键的hash值用于定位数组下标
+ *
+ */
+
 /* Using dictEnableResize() / dictDisableResize() we make possible to
  * enable/disable resizing of the hash table as needed. This is very important
  * for Redis, as we use copy-on-write and don't want to move too much memory
@@ -108,16 +116,32 @@ static void _dictReset(dictht *ht)
 }
 
 /* Create a new hash table */
+/*
+ * 创建并初始化一个哈希表
+ *
+ * 参数列表
+ *      1. type: 哈希表的类型
+ *      2. privDataPtr: 之前的数据
+ *
+ * 返回值
+ *      哈希表结构体指针
+ */
 dict *dictCreate(dictType *type,
         void *privDataPtr)
 {
+    // dict *d会先生成然后再执行右边语句
+    // 相当于 dict* d;  d = zmalloc(sizeof(*d));
     dict *d = zmalloc(sizeof(*d));
 
+    // 初始化哈希表结构和数据
     _dictInit(d,type,privDataPtr);
     return d;
 }
 
 /* Initialize the hash table */
+/*
+ * 初始化哈希表
+ */
 int _dictInit(dict *d, dictType *type,
         void *privDataPtr)
 {
@@ -289,12 +313,25 @@ int dictAdd(dict *d, void *key, void *val)
  *
  * If key was added, the hash entry is returned to be manipulated by the caller.
  */
+/*
+ * 往哈希表中添加一个元素
+ * 入参中只有键K并没有值V，因为该函数将返回K对应的entry的指针，让调用者直接操作该entry
+ * 如果哈希表中已经存在键K则会在出参中设置已存在的entry并返回NULL以通知调用者
+ *
+ * 参数列表
+ *      1. d: 待操作的哈希表
+ *      2. key: 键值K
+ *      3. existing: 出参，如果对应K已存在将存在entry设置在该出参中
+ *
+ * 如果成功添加对应K则返回K对应entry的指针，如果K位置已存在entry则返回NULL
+ */
 dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 {
     int index;
     dictEntry *entry;
     dictht *ht;
 
+    // 是否操作重新hash的阈值
     if (dictIsRehashing(d)) _dictRehashStep(d);
 
     /* Get the index of the new element, or -1 if
