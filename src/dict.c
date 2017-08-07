@@ -209,6 +209,18 @@ int dictExpand(dict *d, unsigned long size)
  * guaranteed that this function will rehash even a single bucket, since it
  * will visit at max N*10 empty buckets in total, otherwise the amount of
  * work it does would be unbound and the function may block for a long time. */
+/*
+ * 重新hash这个哈希表
+ * Redis的哈希表结构公有两个table数组，t0和t1，平常只使用一个t0，当需要重hash时则重hash到另一个table数组中
+ *
+ * 参数列表
+ *      1. d: 待移动的哈希表，结构中存有目前已经重hash到哪个桶了
+ *      2. n: 要哈希多少个桶
+ *
+ * 返回值
+ *      返回0说明整个表都重hash完成了，返回1代表未完成
+ *
+ */
 int dictRehash(dict *d, int n) {
     int empty_visits = n*10; /* Max number of empty buckets to visit. */
     if (!dictIsRehashing(d)) return 0;
@@ -223,8 +235,10 @@ int dictRehash(dict *d, int n) {
             d->rehashidx++;
             if (--empty_visits == 0) return 1;
         }
+        // 获取要重新hash的桶
         de = d->ht[0].table[d->rehashidx];
         /* Move all the keys in this bucket from the old to the new hash HT */
+        // 将这个桶里的元素逐一从t0移动到t1中
         while(de) {
             unsigned int h;
 
@@ -238,10 +252,12 @@ int dictRehash(dict *d, int n) {
             de = nextde;
         }
         d->ht[0].table[d->rehashidx] = NULL;
+        // 准备移动下一个桶
         d->rehashidx++;
     }
 
     /* Check if we already rehashed the whole table... */
+    // 检查是否整个表都移动完毕
     if (d->ht[0].used == 0) {
         zfree(d->ht[0].table);
         d->ht[0] = d->ht[1];
@@ -281,7 +297,13 @@ int dictRehashMilliseconds(dict *d, int ms) {
  * This function is called by common lookup or update operations in the
  * dictionary so that the hash table automatically migrates from H1 to H2
  * while it is actively used. */
+/*
+ * 重新映射各个键的位置，也就是重新hash
+ * 但是只是hash一小部分，仅仅是一个table数组中指定下标的桶，也就是该下标下的这一个链表
+ *
+ */
 static void _dictRehashStep(dict *d) {
+    // 仅当目前没有有效的迭代器时才重hash该桶对应链表
     if (d->iterators == 0) dictRehash(d,1);
 }
 
@@ -331,7 +353,7 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
     dictEntry *entry;
     dictht *ht;
 
-    // 是否操作重新hash的阈值
+    // 是否超过重新hash的阈值
     if (dictIsRehashing(d)) _dictRehashStep(d);
 
     /* Get the index of the new element, or -1 if
