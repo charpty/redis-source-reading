@@ -137,6 +137,7 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
         (d)->type->keyCompare((d)->privdata, key1, key2) : \
         (key1) == (key2))
 
+// 调用哈希表设置好的哈希函数对K进行哈希
 #define dictHashKey(d, key) (d)->type->hashFunction(key)
 #define dictGetKey(he) ((he)->key)
 #define dictGetVal(he) ((he)->v.val)
@@ -145,6 +146,8 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 #define dictGetDoubleVal(he) ((he)->v.d)
 #define dictSlots(d) ((d)->ht[0].size+(d)->ht[1].size)
 #define dictSize(d) ((d)->ht[0].used+(d)->ht[1].used)
+// 判断哈希表是否需要重哈希
+// Redis哈希表的重哈希是逐桶进行的
 #define dictIsRehashing(d) ((d)->rehashidx != -1)
 
 /* API */

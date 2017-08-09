@@ -168,17 +168,30 @@ int dictResize(dict *d)
 }
 
 /* Expand or create the hash table */
+/*
+ * 扩展哈希表到指定大小
+ *
+ * 参数列表
+ *      1. d: 待扩展的哈希表
+ *      2. size: 要扩展至的大小
+ *
+ * 返回值
+ *      返回0代表扩展成功，返回1代表扩展失败
+ */
 int dictExpand(dict *d, unsigned long size)
 {
     dictht n; /* the new hash table */
+    // 哈希表的桶的大小总是2的指数倍大小
     unsigned long realsize = _dictNextPower(size);
 
     /* the size is invalid if it is smaller than the number of
      * elements already inside the hash table */
+    // 如果要扩展至的大小是个无效的值则返回扩展失败
     if (dictIsRehashing(d) || d->ht[0].used > size)
         return DICT_ERR;
 
     /* Rehashing to the same table size is not useful. */
+    // 如果本来就是这个大小了则没有必要扩展了
     if (realsize == d->ht[0].size) return DICT_ERR;
 
     /* Allocate the new hash table and initialize all pointers to NULL */
@@ -308,11 +321,26 @@ static void _dictRehashStep(dict *d) {
 }
 
 /* Add an element to the target hash table */
+/*
+ * 将指定键值对添加到哈希表中
+ *
+ * 参数列表
+ *      1. d: 要添加的哈希表
+ *      2. key: 要插入的键K
+ *      3. val: 要插入的值V
+ *
+ * 返回值
+ *      返回0代表插入成功，返回1代表插入失败
+ */
 int dictAdd(dict *d, void *key, void *val)
 {
+    // 首先尝试在哈希表中获取一个有效的entry
+    // 如果获取到了则可以将这个entry的K、V设置成指定值
     dictEntry *entry = dictAddRaw(d,key,NULL);
 
+    // 如果没有获取到有效entry则无法插入，返回错误码
     if (!entry) return DICT_ERR;
+    // 将获取到的entry设置为要设置的K、V值
     dictSetVal(d, entry, val);
     return DICT_OK;
 }
@@ -973,33 +1001,55 @@ unsigned long dictScan(dict *d,
 /* ------------------------- private functions ------------------------------ */
 
 /* Expand the hash table if needed */
+/*
+ * 在必要时对哈希表进行扩张
+ *
+ * 参数列表
+ *      1. d: 待检查的哈希表
+ *
+ */
 static int _dictExpandIfNeeded(dict *d)
 {
     /* Incremental rehashing already in progress. Return. */
+    // 如果哈希表正处于重hash阶段(重哈希本来就有扩展功能)则直接返回处理完毕
     if (dictIsRehashing(d)) return DICT_OK;
 
     /* If the hash table is empty expand it to the initial size. */
+    // 如果目前哈希表是空的则扩展至默认的初始化大小
     if (d->ht[0].size == 0) return dictExpand(d, DICT_HT_INITIAL_SIZE);
 
     /* If we reached the 1:1 ratio, and we are allowed to resize the hash
      * table (global setting) or we should avoid it but the ratio between
      * elements/buckets is over the "safe" threshold, we resize doubling
      * the number of buckets. */
+    // 如果桶和元素个数的比例超过安全域值则扩展哈希表
     if (d->ht[0].used >= d->ht[0].size &&
         (dict_can_resize ||
          d->ht[0].used/d->ht[0].size > dict_force_resize_ratio))
     {
+        // 将哈希表大小扩展至已使用元素两倍大小
         return dictExpand(d, d->ht[0].used*2);
     }
     return DICT_OK;
 }
 
 /* Our hash table capability is a power of two */
+/*
+ * 获取离指定数最接近的且偏大的2的指数倍值，因为是扩展所以返回值取大的没问题
+ * 用来保证哈希表的桶的数量总是2的指数倍个
+ *
+ * 参数列表
+ *      1. size: 要扩展至的大小
+ *
+ * 返回值
+ *      离size最近的2的指数倍值(偏大的值)
+ */
 static unsigned long _dictNextPower(unsigned long size)
 {
     unsigned long i = DICT_HT_INITIAL_SIZE;
 
     if (size >= LONG_MAX) return LONG_MAX;
+    // 逐个遍历2的指数倍值直到大于指定值为止
     while(1) {
         if (i >= size)
             return i;
@@ -1014,10 +1064,14 @@ static unsigned long _dictNextPower(unsigned long size)
  *
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
+/*
+ *
+ */
 static int _dictKeyIndex(dict *d, const void *key, unsigned int hash, dictEntry **existing)
 {
     unsigned int idx, table;
     dictEntry *he;
+    // 将出参置空
     if (existing) *existing = NULL;
 
     /* Expand the hash table if needed */
