@@ -56,6 +56,8 @@
  *
  * 简单看了下也是和JDK7之前版本实现类似
  * 采用数组 + 链表的形式实现，键的hash值用于定位数组下标
+ * 在哈希表中最基本的存储单元是entry，一个entry中包含键K和值V以及下一个entry的指针
+ * 使用键的hash值定位桶的位置，使用entry链表方式来处理哈希冲突情况
  *
  */
 
@@ -314,6 +316,9 @@ int dictRehashMilliseconds(dict *d, int ms) {
  * 重新映射各个键的位置，也就是重新hash
  * 但是只是hash一小部分，仅仅是一个table数组中指定下标的桶，也就是该下标下的这一个链表
  *
+ * 参数列表
+ *      1. d: 待重hash的表
+ *
  */
 static void _dictRehashStep(dict *d) {
     // 仅当目前没有有效的迭代器时才重hash该桶对应链表
@@ -386,6 +391,8 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
 
     /* Get the index of the new element, or -1 if
      * the element already exists. */
+    // 先获取键所对应的桶(通过hash键可得到桶再遍历桶对应的链表即可获取key所在位置是否已存在entry)
+    // 如果该键在本表中已经存在了则直接设置好出参entry并返回NULL即可
     if ((index = _dictKeyIndex(d, key, dictHashKey(d,key), existing)) == -1)
         return NULL;
 
@@ -1065,7 +1072,16 @@ static unsigned long _dictNextPower(unsigned long size)
  * Note that if we are in the process of rehashing the hash table, the
  * index is always returned in the context of the second (new) hash table. */
 /*
+ * 查找是否存在指定key位置的entry，没有则返回该key应存放在表中桶的位置
  *
+ * 参数列表
+ *      1. d: 指定的哈希表
+ *      2. key: 待查询的键K
+ *      3. hash: 待查询的hash值
+ *      4. existing: 出参，如果该key对应位置存在entry则会将其设置到该出参中
+ *
+ * 返回值
+ *      已存在指定key则返回-1，否则返回0
  */
 static int _dictKeyIndex(dict *d, const void *key, unsigned int hash, dictEntry **existing)
 {
@@ -1075,6 +1091,7 @@ static int _dictKeyIndex(dict *d, const void *key, unsigned int hash, dictEntry 
     if (existing) *existing = NULL;
 
     /* Expand the hash table if needed */
+    // 扩展哈希表失败
     if (_dictExpandIfNeeded(d) == DICT_ERR)
         return -1;
     for (table = 0; table <= 1; table++) {
