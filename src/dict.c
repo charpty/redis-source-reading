@@ -197,6 +197,7 @@ int dictExpand(dict *d, unsigned long size)
     if (realsize == d->ht[0].size) return DICT_ERR;
 
     /* Allocate the new hash table and initialize all pointers to NULL */
+    // 设置新table的初始化参数值
     n.size = realsize;
     n.sizemask = realsize-1;
     n.table = zcalloc(realsize*sizeof(dictEntry*));
@@ -204,12 +205,14 @@ int dictExpand(dict *d, unsigned long size)
 
     /* Is this the first initialization? If so it's not really a rehashing
      * we just set the first hash table so that it can accept keys. */
+    // 如果不是重hash而是初始化表则直接设置刚刚新建table为正在使用即可
     if (d->ht[0].table == NULL) {
         d->ht[0] = n;
         return DICT_OK;
     }
 
     /* Prepare a second hash table for incremental rehashing */
+    // 初始化备用table以便后续的扩容、重哈希操作
     d->ht[1] = n;
     d->rehashidx = 0;
     return DICT_OK;
@@ -446,8 +449,20 @@ int dictReplace(dict *d, void *key, void *val)
  * existing key is returned.)
  *
  * See dictAddRaw() for more information. */
+/*
+ * 查找指定key对应的entry
+ *
+ * 参数列表
+ *      1. d: 待操作的哈希表
+ *      2. key: 待插入的键K
+ *
+ * 返回值
+ *      如果指定key位置已存在entry则返回存在的entry，否则返回新建的entry
+ *
+ */
 dictEntry *dictAddOrFind(dict *d, void *key) {
     dictEntry *entry, *existing;
+    // 寻找指定key位置的entry
     entry = dictAddRaw(d,key,&existing);
     return entry ? entry : existing;
 }
@@ -455,6 +470,19 @@ dictEntry *dictAddOrFind(dict *d, void *key) {
 /* Search and remove an element. This is an helper function for
  * dictDelete() and dictUnlink(), please check the top comment
  * of those functions. */
+/*
+ * 删除指定键K所对应的entry
+ * 这个函数是用来作为某些函数的参数(函数指针)的值
+ *
+ * 参数列表
+ *      1. d: 待操作的哈希表
+ *      2. key: 待删除的entry的键K
+ *      3. nofree: 不要释放entry所用内存
+ *
+ * 返回值
+ *      返回对应删除的entry
+ *
+ */
 static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
     unsigned int h, idx;
     dictEntry *he, *prevHe;
@@ -462,21 +490,28 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
 
     if (d->ht[0].used == 0 && d->ht[1].used == 0) return NULL;
 
+    // 所有涉及到修改哈希表结构的都需要判断是否处于重hash状态
     if (dictIsRehashing(d)) _dictRehashStep(d);
     h = dictHashKey(d, key);
 
+    // 遍历哈希表中的各个table(实际上只有两个)
     for (table = 0; table <= 1; table++) {
         idx = h & d->ht[table].sizemask;
+        // 通过hash值定位表中桶的位置
         he = d->ht[table].table[idx];
         prevHe = NULL;
         while(he) {
+            // 如果找到指定key对应的entry则执行删除
             if (key==he->key || dictCompareKeys(d, key, he->key)) {
                 /* Unlink the element from the list */
+                // 解除上个节点的引用
                 if (prevHe)
                     prevHe->next = he->next;
                 else
+                    // 如果是首个节点的话则将第二个节点设置为新的首节点
                     d->ht[table].table[idx] = he->next;
                 if (!nofree) {
+                    // 释放entry所占内存，K、V以及entry本身
                     dictFreeKey(d, he);
                     dictFreeVal(d, he);
                     zfree(he);
