@@ -143,6 +143,11 @@ dict *dictCreate(dictType *type,
 /* Initialize the hash table */
 /*
  * 初始化哈希表
+ *
+ * 参数列表
+ *      1. d: 待初始化的哈希表
+ *      2. type: 哈希表的类型
+ *      3. privDataPtr: 之前数据的值
  */
 int _dictInit(dict *d, dictType *type,
         void *privDataPtr)
@@ -419,14 +424,27 @@ dictEntry *dictAddRaw(dict *d, void *key, dictEntry **existing)
  * Return 1 if the key was added from scratch, 0 if there was already an
  * element with such key and dictReplace() just performed a value update
  * operation. */
+/*
+ * 插入或更新键K对应的值V
+ *
+ * 参数列表
+ *      1. d: 待处理的哈希表
+ *      2. key: 键K
+ *      3. val: 要插入或更新的值V
+ *
+ * 返回值
+ *      返回1代表是新插入的值，返回0代表是更新的值
+ */
 int dictReplace(dict *d, void *key, void *val)
 {
     dictEntry *entry, *existing, auxentry;
 
     /* Try to add the element. If the key
      * does not exists dictAdd will suceed. */
+    // 先查找指定键K是否已存在entry
     entry = dictAddRaw(d,key,&existing);
     if (entry) {
+        // 不存在键K对应的entry则在设置新建入的entry的值
         dictSetVal(d, entry, val);
         return 1;
     }
@@ -436,7 +454,9 @@ int dictReplace(dict *d, void *key, void *val)
      * as the previous one. In this context, think to reference counting,
      * you want to increment (set), and then decrement (free), and not the
      * reverse. */
+    // 表中已经有键K对应的entry则更新该entry的即可
     auxentry = *existing;
+    // 之所以要先设置新值是考虑到极端情况：新值和旧值其实是同一个内存地址(完全指向的同一块内存)
     dictSetVal(d, existing, val);
     dictFreeVal(d, &auxentry);
     return 0;
@@ -529,6 +549,16 @@ static dictEntry *dictGenericDelete(dict *d, const void *key, int nofree) {
 
 /* Remove an element, returning DICT_OK on success or DICT_ERR if the
  * element was not found. */
+/*
+ * 删除哈希表中的指定元素
+ *
+ * 参数列表
+ *      1. dt: 待操作的哈希表
+ *      2. key: 要删除的键K
+ *
+ * 返回值
+ *      返回0代表删除成功，返回1代表删除失败
+ */
 int dictDelete(dict *ht, const void *key) {
     return dictGenericDelete(ht,key,0) ? DICT_OK : DICT_ERR;
 }
@@ -568,6 +598,17 @@ void dictFreeUnlinkedEntry(dict *d, dictEntry *he) {
 }
 
 /* Destroy an entire dictionary */
+/*
+ * 重置哈希表指定table数组
+ *
+ * 参数列表
+ *      1. d: 待处理的哈希表
+ *      2. ht: 要处理的table
+ *      3. callback: 用于处理之前的数据的函数，如果设置了则会调用
+ *
+ * 返回值
+ *      返回0代表重置成功，实际上只会返回0
+ */
 int _dictClear(dict *d, dictht *ht, void(callback)(void *)) {
     unsigned long i;
 
@@ -578,6 +619,7 @@ int _dictClear(dict *d, dictht *ht, void(callback)(void *)) {
         if (callback && (i & 65535) == 0) callback(d->privdata);
 
         if ((he = ht->table[i]) == NULL) continue;
+        // 逐个清理指定table中的entry
         while(he) {
             nextHe = he->next;
             dictFreeKey(d, he);
@@ -588,6 +630,7 @@ int _dictClear(dict *d, dictht *ht, void(callback)(void *)) {
         }
     }
     /* Free the table and the allocated cache structure */
+    // 把table对应的内存也释放掉
     zfree(ht->table);
     /* Re-initialize the table */
     _dictReset(ht);
@@ -602,17 +645,32 @@ void dictRelease(dict *d)
     zfree(d);
 }
 
+/*
+ * 在哈希表中查找键K对应的entry
+ *
+ * 参数列表
+ *      1. d: 待查找的哈希表
+ *      2. key: 待查找的键K
+ *
+ * 返回值
+ *      键K在哈希表中对应的entry
+ *
+ */
 dictEntry *dictFind(dict *d, const void *key)
 {
     dictEntry *he;
     unsigned int h, idx, table;
 
+    // 如果哈希表本身是个空表则不用查了
     if (d->ht[0].used + d->ht[1].used == 0) return NULL; /* dict is empty */
     if (dictIsRehashing(d)) _dictRehashStep(d);
+    // 用hash值定位桶位置
     h = dictHashKey(d, key);
+    // 逐个遍历表中的各个table
     for (table = 0; table <= 1; table++) {
         idx = h & d->ht[table].sizemask;
         he = d->ht[table].table[idx];
+        // 逐个遍历这个桶对应链表的entry
         while(he) {
             if (key==he->key || dictCompareKeys(d, key, he->key))
                 return he;
@@ -623,9 +681,20 @@ dictEntry *dictFind(dict *d, const void *key)
     return NULL;
 }
 
+/*
+ * 获取哈希表中指定键K对应的值
+ *
+ * 参数列表
+ *      1. d: 待查找的哈希表
+ *      2. key: 键K
+ *
+ * 返回值
+ *      存在键K对应的值则返回否则返回空
+ */
 void *dictFetchValue(dict *d, const void *key) {
     dictEntry *he;
 
+    // 先尝试找键K对应的entry，找到则获取entry的值即可
     he = dictFind(d,key);
     return he ? dictGetVal(he) : NULL;
 }
@@ -1160,6 +1229,16 @@ void dictDisableResize(void) {
     dict_can_resize = 0;
 }
 
+/*
+ * 计算指定键K的hash值
+ *
+ * 参数列表
+ *      1. d: 键K要存放的哈希表，因为在表上设置了具体hash函数(函数指针)，所以需要它作为参数
+ *      2. key: 待哈希的键K
+ *
+ * 返回值
+ *      键K对应的哈希值
+ */
 unsigned int dictGetHash(dict *d, const void *key) {
     return dictHashKey(d, key);
 }

@@ -141,6 +141,7 @@ typedef void (dictScanBucketFunction)(void *privdata, dictEntry **bucketref);
 // 调用哈希表设置好的哈希函数对K进行哈希
 #define dictHashKey(d, key) (d)->type->hashFunction(key)
 #define dictGetKey(he) ((he)->key)
+// 获取entry对应的值
 #define dictGetVal(he) ((he)->v.val)
 #define dictGetSignedIntegerVal(he) ((he)->v.s64)
 #define dictGetUnsignedIntegerVal(he) ((he)->v.u64)
