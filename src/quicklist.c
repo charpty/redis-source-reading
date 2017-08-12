@@ -551,12 +551,15 @@ REDIS_STATIC int _quicklistNodeAllowMerge(const quicklistNode *a,
 int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) {
     quicklistNode *orig_head = quicklist->head;
     // likely是条件大概率为真时的语法优化写法
+    // 首先需要判断当前快速链表节点是否能够再添加值
     if (likely(
             _quicklistNodeAllowInsert(quicklist->head, quicklist->fill, sz))) {
+        // 能的话则将值插入到当前节点对应的ziplist中即可
         quicklist->head->zl =
             ziplistPush(quicklist->head->zl, value, sz, ZIPLIST_HEAD);
         quicklistNodeUpdateSz(quicklist->head);
     } else {
+        // 不能则创建一个新的快速链表节点并将值插入
         quicklistNode *node = quicklistCreateNode();
         node->zl = ziplistPush(ziplistNew(), value, sz, ZIPLIST_HEAD);
 
