@@ -1,6 +1,13 @@
 4.0 版本中文翻译
 闲暇时个人娱乐
 
+目前已增加注释的文件(仅写C文件)
+sds.c: Redis自定义的动态字符串实现，这一部分被单独提出一个项目，也可以用在别的系统上
+adlist.c: Redis的双向链表实现，多用于Redis内部存储各种关系集合
+ziplist.c: Redis的压缩链表，采用类似通用的TLV形式对数据进行各种编码压缩
+quicklist.c: 这是真正意义用户使用的列表(LPUSH系列命令)
+dict.c: Redis实现的字典，类似于JDK中的hashmap
+
 
 This README is just a fast *quick start* document. You can find more detailed documentation at http://redis.io.
 
