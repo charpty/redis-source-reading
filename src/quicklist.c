@@ -684,23 +684,35 @@ quicklist *quicklistCreateFromZiplist(int fill, int compress,
         }                                                                      \
     } while (0)
 
+/*
+ * 删除快速链表的指定节点(quicklistNode)
+ *
+ * 参数列表
+ *      1. quicklist: 待处理的快速链表
+ *      2. node: 待删除的节点
+ *
+ */
 REDIS_STATIC void __quicklistDelNode(quicklist *quicklist,
                                      quicklistNode *node) {
+    // 清理节点的上下节点关系
     if (node->next)
         node->next->prev = node->prev;
     if (node->prev)
         node->prev->next = node->next;
 
+    // 如果删除的是尾部节点则更新链表结构体的"尾部元素"成员变量
     if (node == quicklist->tail) {
         quicklist->tail = node->prev;
     }
 
+    // 如果删除的是头部节点则更新链表结构体的"头部元素"成员变量
     if (node == quicklist->head) {
         quicklist->head = node->next;
     }
 
     /* If we deleted a node within our compress depth, we
      * now have compressed nodes needing to be decompressed. */
+    // 由于快速链表是设置了两端节点压缩个数的，所以要保证删除节点链表依然遵循该规则
     __quicklistCompress(quicklist, NULL);
 
     quicklist->count -= node->count;
@@ -1063,22 +1075,39 @@ void quicklistInsertAfter(quicklist *quicklist, quicklistEntry *entry,
  * have to be careful about tracking where we start and end.
  *
  * Returns 1 if entries were deleted, 0 if nothing was deleted. */
+/*
+ * 删除指定范围的数据节点(ziplist中的节点)
+ * 这些待删除的节点可能在多个quicklistNode中，所以可能需要解析多个quicklistNode
+ *
+ * 参数列表
+ *      1. quicklist: 待处理的快速列表
+ *      2. statr: 待删除的节点范围起始位置
+ *      3. count: 待删除的节点的个数
+ *
+ * 返回值
+ *      删除成功则返回1，删除失败则返回0
+ */
 int quicklistDelRange(quicklist *quicklist, const long start,
                       const long count) {
+    // 要删除0个节点等于不删除
     if (count <= 0)
         return 0;
 
+    // 计算实际删除个数，start既可以从头部开始往后，也可以从尾部开始往前(负数)
     unsigned long extent = count; /* range is inclusive of start position */
 
     if (start >= 0 && extent > (quicklist->count - start)) {
         /* if requesting delete more elements than exist, limit to list size. */
+        // 如果要删除的节点的个数大于从其实位置往后还剩下的节点的个数则仅删除往后的所有节点
         extent = quicklist->count - start;
     } else if (start < 0 && extent > (unsigned long)(-start)) {
         /* else, if at negative offset, limit max size to rest of list. */
+        // 如果是负数则最多可删除整个链表所有数据
         extent = -start; /* c.f. LREM -29 29; just delete until end. */
     }
 
     quicklistEntry entry;
+    // 首先获取到指定起始位置的ziplist、实际数据项、quicklistNode等信息(都存放在工具型结构体quicklistEntry中)
     if (!quicklistIndex(quicklist, start, &entry))
         return 0;
 
@@ -1087,7 +1116,9 @@ int quicklistDelRange(quicklist *quicklist, const long start,
     quicklistNode *node = entry.node;
 
     /* iterate over next nodes until everything is deleted. */
+    // 开始逐个删除
     while (extent) {
+        // 先从当前quicklistNode开始删除
         quicklistNode *next = node->next;
 
         unsigned long del;
@@ -1095,11 +1126,16 @@ int quicklistDelRange(quicklist *quicklist, const long start,
         if (entry.offset == 0 && extent >= node->count) {
             /* If we are deleting more than the count of this node, we
              * can just delete the entire node without ziplist math. */
+            // 首先当前循环删除的起始位置正好是quicklistNode的首部
+            // 并且要删除的节点数量大于当前quicklistNode所包含的节点数量则先删除当前quicklistNode中所有节点
             delete_entire_node = 1;
+            // 删除数量等于当前quicklistNode所包含ziplist对应的数据节点数量
             del = node->count;
         } else if (entry.offset >= 0 && extent >= node->count) {
             /* If deleting more nodes after this one, calculate delete based
              * on size of current node. */
+            // 删除的起始位置不是当前quicklistNode的首部
+            // 且要删除的数量大于从起始位置往后数还剩余的节点数量则删除起始位置往后的所有数据节点
             del = node->count - entry.offset;
         } else if (entry.offset < 0) {
             /* If offset is negative, we are in the first run of this loop
@@ -1107,16 +1143,20 @@ int quicklistDelRange(quicklist *quicklist, const long start,
              * from this start offset to end of list.  Since the Negative
              * offset is the number of elements until the tail of the list,
              * just use it directly as the deletion count. */
+            // 如果负数则代表从此处开始一直删除到链表尾部
             del = -entry.offset;
 
             /* If the positive offset is greater than the remaining extent,
              * we only delete the remaining extent, not the entire offset.
              */
+            // 删除的数量应小于等于指定要删除的数量
             if (del > extent)
                 del = extent;
         } else {
             /* else, we are deleting less than the extent of this node, so
              * use extent directly. */
+            // 当前quicklistNode所包含数据节点数量足够删除了
+            // 那就在当前quicklistNode对应的ziplist中删除指定个数据节点即可
             del = extent;
         }
 
@@ -1125,14 +1165,20 @@ int quicklistDelRange(quicklist *quicklist, const long start,
           extent, del, entry.offset, delete_entire_node, node->count);
 
         if (delete_entire_node) {
+            // 直接删除整个quicklistNode节点
             __quicklistDelNode(quicklist, node);
         } else {
+            // 将当前quicklistNode节点解压开来以便使用
             quicklistDecompressNodeForUse(node);
+            // 在当前节点包含的ziplist中删除指定个数据节点
             node->zl = ziplistDeleteRange(node->zl, entry.offset, del);
+            // 更新当前quicklistNode结构体中的"数据节点个数"成员变量
             quicklistNodeUpdateSz(node);
             node->count -= del;
             quicklist->count -= del;
+            // 删除指定个元素之后，如果当前节点中已经不包含实际数据节点了，那也没存在的必要了
             quicklistDeleteIfEmpty(quicklist, node);
+            // 如果节点没有被删除则判断其是否需要重新压缩
             if (node)
                 quicklistRecompressOnly(quicklist, node);
         }
@@ -1305,23 +1351,29 @@ int quicklistNext(quicklistIter *iter, quicklistEntry *entry) {
 
     if (iter->zi) {
         /* Populate value from existing ziplist position */
+        // 如果当前ziplist有效(还有数据)则直接取当前ziplist下一个值即可
         ziplistGet(entry->zi, &entry->value, &entry->sz, &entry->longval);
         return 1;
     } else {
         /* We ran out of ziplist entries.
          * Pick next node, update offset, then re-run retrieval. */
+        // 当前ziplist无效(其数据节点已遍历完)则获取下一个quicklistNode中的ziplist
         quicklistCompress(iter->quicklist, iter->current);
         if (iter->direction == AL_START_HEAD) {
             /* Forward traversal */
+            // 从前往后遍历
             D("Jumping to start of next node");
+            // 获取下一个quicklistNode并将迭代器指向的当前ziplist置空
             iter->current = iter->current->next;
             iter->offset = 0;
         } else if (iter->direction == AL_START_TAIL) {
             /* Reverse traversal */
+            // 从后往前遍历
             D("Jumping to end of previous node");
             iter->current = iter->current->prev;
             iter->offset = -1;
         }
+        // 将迭代器当前有效的ziplist置空以便递归调用时知道是要重新从quicklistNode中取出ziplist
         iter->zi = NULL;
         return quicklistNext(iter, entry);
     }
