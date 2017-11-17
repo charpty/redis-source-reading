@@ -937,6 +937,9 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
 
 /* Function to reverse bits. Algorithm from:
  * http://graphics.stanford.edu/~seander/bithacks.html#ReverseParallel */
+/*
+ * 反转long前、后位
+ */
 static unsigned long rev(unsigned long v) {
     unsigned long s = 8 * sizeof(v); // bit size; must be power of 2
     unsigned long mask = ~0;
@@ -949,20 +952,32 @@ static unsigned long rev(unsigned long v) {
 
 /* dictScan() is used to iterate over the elements of a dictionary.
  *
+ * dictScan用于迭代字典中的元素
+ *
  * Iterating works the following way:
+ *
+ * 迭代过程的实现如下
  *
  * 1) Initially you call the function using a cursor (v) value of 0.
  * 2) The function performs one step of the iteration, and returns the
  *    new cursor value you must use in the next call.
  * 3) When the returned cursor is 0, the iteration is complete.
  *
+ * 1) 首先将游标（迭代已进行到的位置）初始化为0
+ * 2）从游标位置接着往下走一步，并返回新的游标位置，如果想继续迭代，调用者下次传入返回到新游标地址即可
+ * 3）如果当前游标位置没有下一个元素了，那么就返回0，告诉调用者迭代已经完成
+ *
  * The function guarantees all elements present in the
  * dictionary get returned between the start and end of the iteration.
  * However it is possible some elements get returned multiple times.
  *
+ * 该函数保证了所有字典中到元素都会返回，但是相同到元素有可能返回多次
+ *
  * For every element returned, the callback argument 'fn' is
  * called with 'privdata' as first argument and the dictionary entry
  * 'de' as second argument.
+ *
+ * 对每一个元素，都会循环调用fn函数并传入所在entry，以便调用者逐个处理各个元素
  *
  * HOW IT WORKS.
  *
@@ -1043,6 +1058,7 @@ unsigned long dictScan(dict *d,
 
     if (dictSize(d) == 0) return 0;
 
+    // 当前字典未处于重hash状态,
     if (!dictIsRehashing(d)) {
         t0 = &(d->ht[0]);
         m0 = t0->sizemask;
@@ -1061,6 +1077,7 @@ unsigned long dictScan(dict *d,
         t1 = &d->ht[1];
 
         /* Make sure t0 is the smaller and t1 is the bigger table */
+        // 保证t0指向较小的table
         if (t0->size > t1->size) {
             t0 = &d->ht[1];
             t1 = &d->ht[0];
