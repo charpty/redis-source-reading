@@ -81,6 +81,9 @@ robj *createRawStringObject(const char *ptr, size_t len) {
 /* Create a string object with encoding OBJ_ENCODING_EMBSTR, that is
  * an object where the sds string is actually an unmodifiable string
  * allocated in the same chunk as the object itself. */
+/*
+ *
+ */
 robj *createEmbeddedStringObject(const char *ptr, size_t len) {
     robj *o = zmalloc(sizeof(robj)+sizeof(struct sdshdr8)+len+1);
     struct sdshdr8 *sh = (void*)(o+1);
@@ -115,6 +118,8 @@ robj *createEmbeddedStringObject(const char *ptr, size_t len) {
  * we allocate as EMBSTR will still fit into the 64 byte arena of jemalloc. */
 #define OBJ_ENCODING_EMBSTR_SIZE_LIMIT 44
 robj *createStringObject(const char *ptr, size_t len) {
+    // 当字符串长度小于44时使用embstr形式
+    // 长于44的使用RAW格式存储
     if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT)
         return createEmbeddedStringObject(ptr,len);
     else
@@ -316,6 +321,7 @@ void incrRefCount(robj *o) {
 }
 
 void decrRefCount(robj *o) {
+    //
     if (o->refcount == 1) {
         switch(o->type) {
         case OBJ_STRING: freeStringObject(o); break;
@@ -460,13 +466,21 @@ robj *tryObjectEncoding(robj *o) {
 
 /* Get a decoded version of an encoded object (returned as a new object).
  * If the object is already raw-encoded just increment the ref count. */
+/*
+ * 获取解码后的对象,还是返回1个robj结构对象
+ *
+ * 参数列表:
+ *      1、o: 待转换的结构体
+ */
 robj *getDecodedObject(robj *o) {
     robj *dec;
 
+    // list里面存的都是字符串
     if (sdsEncodedObject(o)) {
         incrRefCount(o);
         return o;
     }
+    // 如果不是字符串的embstr或者rawstr存储的就转换为该类型
     if (o->type == OBJ_STRING && o->encoding == OBJ_ENCODING_INT) {
         char buf[32];
 

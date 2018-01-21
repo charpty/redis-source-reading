@@ -1691,8 +1691,19 @@ int quicklistPop(quicklist *quicklist, int where, unsigned char **data,
 }
 
 /* Wrapper to allow argument-based switching between HEAD/TAIL pop */
+/*
+ * 这里只是封装下根据不同的where做List当push动作
+ *
+ * 参数列表:
+ *      1. quicklist: 待放置的list
+ *      2. value: 具体值
+ *      3. sz: 实际值的长度
+ *      4. where: 放置在首部还是尾部
+ *
+ */
 void quicklistPush(quicklist *quicklist, void *value, const size_t sz,
                    int where) {
+    // 这里比较简单,根据不同类型调方法
     if (where == QUICKLIST_HEAD) {
         quicklistPushHead(quicklist, value, sz);
     } else if (where == QUICKLIST_TAIL) {

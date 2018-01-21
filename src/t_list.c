@@ -38,9 +38,21 @@
  *
  * There is no need for the caller to increment the refcount of 'value' as
  * the function takes care of it if needed. */
+/*
+ *
+ * 客户端的lpush命令直接实现
+ *
+ * 参数列表
+ *      1. subject: 键Key
+ *      2. value: 值
+ *      3. where: 插入值在list中的位置
+ */
 void listTypePush(robj *subject, robj *value, int where) {
+    // 首先目前仅支持quicklist形式存储list元素
     if (subject->encoding == OBJ_ENCODING_QUICKLIST) {
+        // 判断是要追加到尾部还是首部
         int pos = (where == LIST_HEAD) ? QUICKLIST_HEAD : QUICKLIST_TAIL;
+        //
         value = getDecodedObject(value);
         size_t len = sdslen(value->ptr);
         quicklistPush(subject->ptr, value->ptr, len, pos);
