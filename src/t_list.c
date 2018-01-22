@@ -52,10 +52,11 @@ void listTypePush(robj *subject, robj *value, int where) {
     if (subject->encoding == OBJ_ENCODING_QUICKLIST) {
         // 判断是要追加到尾部还是首部
         int pos = (where == LIST_HEAD) ? QUICKLIST_HEAD : QUICKLIST_TAIL;
-        //
+        // 根据长度和类型判断是否需要拷贝内存
         value = getDecodedObject(value);
         size_t len = sdslen(value->ptr);
         quicklistPush(subject->ptr, value->ptr, len, pos);
+        // 值已经被拷贝到内存中,如果RAW以下字符串存储方式则直接使用(引用计数也已加1)
         decrRefCount(value);
     } else {
         serverPanic("Unknown list encoding");

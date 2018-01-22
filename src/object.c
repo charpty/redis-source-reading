@@ -477,6 +477,7 @@ robj *getDecodedObject(robj *o) {
 
     // list里面存的都是字符串
     if (sdsEncodedObject(o)) {
+        // 等于说是直接使用原来的值的引用,所以这里先将计数器加1,避免后面减1给释放了
         incrRefCount(o);
         return o;
     }
