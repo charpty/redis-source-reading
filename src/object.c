@@ -1032,6 +1032,16 @@ robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply) {
 
 /* Object command allows to inspect the internals of an Redis Object.
  * Usage: OBJECT <refcount|encoding|idletime> <key> */
+/*
+ * Redis客户端object命令的实现,有4个子命令
+ * refcount: key的引用计数
+ * encoding: 对应元素的存储实际实现方式
+ * idletime: key空转时间,即元素没有被访问或更新的时间
+ * freq: 访问的频繁
+ *
+ * 参数列表:
+ *      1. c: 客户端指针
+ */
 void objectCommand(client *c) {
     robj *o;
 
