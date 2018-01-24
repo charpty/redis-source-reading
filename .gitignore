@@ -1,6 +1,8 @@
 .*.swp
 *.o
 *.log
+src/cscope.out
+src/tags
 dump.rdb
 redis-benchmark
 redis-check-aof
