@@ -34,6 +34,12 @@
 #define ZIPLIST_HEAD 0
 #define ZIPLIST_TAIL 1
 
+/*
+ * Redis的压缩列表是一个顺序表
+ * 通过类似TLV的存储形式来节约内存
+ * 虽然增加了更多的CPU计算，但就目前主流服务器CPU能力远大于内存能力的情况来说是值得的
+ */
+
 unsigned char *ziplistNew(void);
 unsigned char *ziplistMerge(unsigned char **first, unsigned char **second);
 unsigned char *ziplistPush(unsigned char *zl, unsigned char *s, unsigned int slen, int where);

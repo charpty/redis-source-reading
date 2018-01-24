@@ -583,12 +583,17 @@ typedef struct RedisModuleDigest {
 
 #define OBJ_SHARED_REFCOUNT INT_MAX
 typedef struct redisObject {
+    // 一共四种类型string、hash、list、set、zset
     unsigned type:4;
+    // 虽然只有5种类型,但是每一种类型都有多种存储方式
     unsigned encoding:4;
+    // 用于保存该键的最后一次访问时间
     unsigned lru:LRU_BITS; /* LRU time (relative to global lru_clock) or
                             * LFU data (least significant 8 bits frequency
-                            * and most significant 16 bits access time). */
+                            * and most significant 16 bits decreas time). */
+    // 用于统计该键有多少地方引用,便于回收
     int refcount;
+    // 用于存储具体的值的指针
     void *ptr;
 } robj;
 

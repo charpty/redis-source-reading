@@ -340,44 +340,67 @@ int ll2string(char *dst, size_t dstlen, long long svalue) {
  * Because of its strictness, it is safe to use this function to check if
  * you can convert a string into a long long, and obtain back the string
  * from the number without any loss in the string representation. */
+/*
+ * 将一个字符串类型转换为长整型(long)，该字符串本身必须是一个严格的长整型字符串
+ * 包含其它非法字符都认为是非法的，存在前导0则直接认定结果为0
+ * 允许负数，用-(负号)前导
+ *
+ * 参数列表
+ *      1. s: 待转换的字符串(非标准字符串)
+ *      2. slen: 字符串长度，由于不像标准字符串以NULL结尾所以需要指明长度
+ *      3. value: 出参，如果能有效转换则将结果设置到该指针对应地址中
+ *
+ * 返回值
+ *      是否转换成功，成功转换返回1否则返回0
+ */
 int string2ll(const char *s, size_t slen, long long *value) {
     const char *p = s;
     size_t plen = 0;
     int negative = 0;
     unsigned long long v;
 
+    // 字符串长度为0则返回转换失败
     if (plen == slen)
         return 0;
 
     /* Special case: first and only digit is 0. */
+    // 由于前导0非法，率先排除字符串"0"的情况
     if (slen == 1 && p[0] == '0') {
+        // 如果指针是有效的则赋值
         if (value != NULL) *value = 0;
         return 1;
     }
 
+    // 如果是负数
     if (p[0] == '-') {
+        // 记住是负数，有效数据指针往后移动一格
         negative = 1;
         p++; plen++;
 
         /* Abort on only a negative sign. */
+        // 如果仅仅就一个负号则认为转换失败
         if (plen == slen)
             return 0;
     }
 
     /* First digit should be 1-9, otherwise the string should just be 0. */
     if (p[0] >= '1' && p[0] <= '9') {
+        // 记录第一位数字，有效数字位往后移动
         v = p[0]-'0';
         p++; plen++;
     } else if (p[0] == '0' && slen == 1) {
+        // 存在前导0的情况下则直接认为值为0,这里再次判断主要考虑负数情况
         *value = 0;
         return 1;
     } else {
+        // 任意非法数字则返回转换失败
         return 0;
     }
 
     while (plen < slen && p[0] >= '0' && p[0] <= '9') {
         if (v > (ULLONG_MAX / 10)) /* Overflow. */
             return 0;
+        // 进一位并加上既有数值
         v *= 10;
 
         if (v > (ULLONG_MAX - (p[0]-'0'))) /* Overflow. */
@@ -388,10 +411,12 @@ int string2ll(const char *s, size_t slen, long long *value) {
     }
 
     /* Return if not all bytes were used. */
+    // 只要字符串中有任意不合法(没遍历完)则认定转换失败
     if (plen < slen)
         return 0;
 
     if (negative) {
+        // 不能超出能表示都最小负数
         if (v > ((unsigned long long)(-(LLONG_MIN+1))+1)) /* Overflow. */
             return 0;
         if (value != NULL) *value = -v;
@@ -406,6 +431,17 @@ int string2ll(const char *s, size_t slen, long long *value) {
 /* Convert a string into a long. Returns 1 if the string could be parsed into a
  * (non-overflowing) long, 0 otherwise. The value will be set to the parsed
  * value when appropriate. */
+/*
+ * 将字符串转换为长整型(long)
+ *
+ * 参数列表
+ *      1. s: 待转换的字符串(非标准字符串)
+ *      2. slen: 字符串长度，由于不像标准字符串以NULL结尾所以需要指明长度
+ *      3. lval: 出参，如果能有效转换则将结果设置到该指针对应地址中
+ *
+ * 返回值
+ *      转换成功返回1否则返回0
+ */
 int string2l(const char *s, size_t slen, long *lval) {
     long long llval;
 
@@ -426,7 +462,20 @@ int string2l(const char *s, size_t slen, long *lval) {
  * Note that this function demands that the string strictly represents
  * a double: no spaces or other characters before or after the string
  * representing the number are accepted. */
+/*
+ * 将字符串转换为双精度浮点型(long double)
+ * 该字符串必须是一串严格的数字否则都会转换失败
+ *
+ * 参数列表
+ *      1. s: 待转换的字符串(非标准字符串)
+ *      2. slen: 字符串长度，由于不像标准字符串以NULL结尾所以需要指明长度
+ *      3. dp: 出参，如果能有效转换则将结果设置到该指针对应地址中
+ *
+ * 返回值
+ *      转换成功返回1否则返回0
+ */
 int string2ld(const char *s, size_t slen, long double *dp) {
+    // 最多支持256位数字，包括小数和符号
     char buf[256];
     long double value;
     char *eptr;
@@ -436,7 +485,9 @@ int string2ld(const char *s, size_t slen, long double *dp) {
     buf[slen] = '\0';
 
     errno = 0;
+    // 调用系统标准函数将字符串转换为double
     value = strtold(buf, &eptr);
+    // 如果存在前置空格或者字符串中有任意非法字符的都认为是失败
     if (isspace(buf[0]) || eptr[0] != '\0' ||
         (errno == ERANGE &&
             (value == HUGE_VAL || value == -HUGE_VAL || value == 0)) ||

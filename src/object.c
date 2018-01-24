@@ -81,6 +81,9 @@ robj *createRawStringObject(const char *ptr, size_t len) {
 /* Create a string object with encoding OBJ_ENCODING_EMBSTR, that is
  * an object where the sds string is actually an unmodifiable string
  * allocated in the same chunk as the object itself. */
+/*
+ *
+ */
 robj *createEmbeddedStringObject(const char *ptr, size_t len) {
     robj *o = zmalloc(sizeof(robj)+sizeof(struct sdshdr8)+len+1);
     struct sdshdr8 *sh = (void*)(o+1);
@@ -115,6 +118,8 @@ robj *createEmbeddedStringObject(const char *ptr, size_t len) {
  * we allocate as EMBSTR will still fit into the 64 byte arena of jemalloc. */
 #define OBJ_ENCODING_EMBSTR_SIZE_LIMIT 44
 robj *createStringObject(const char *ptr, size_t len) {
+    // 当字符串长度小于44时使用embstr形式
+    // 长于44的使用RAW格式存储
     if (len <= OBJ_ENCODING_EMBSTR_SIZE_LIMIT)
         return createEmbeddedStringObject(ptr,len);
     else
@@ -179,6 +184,11 @@ robj *dupStringObject(const robj *o) {
     }
 }
 
+/*
+ * 创建快速链表对象, 也就是最长使用的List
+ * 当使用LPUSH命令创建一个List时会调用此方法
+ *
+ */
 robj *createQuicklistObject(void) {
     quicklist *l = quicklistCreate();
     robj *o = createObject(OBJ_LIST,l);
@@ -186,6 +196,9 @@ robj *createQuicklistObject(void) {
     return o;
 }
 
+/*
+ *
+ */
 robj *createZiplistObject(void) {
     unsigned char *zl = ziplistNew();
     robj *o = createObject(OBJ_LIST,zl);
@@ -308,6 +321,7 @@ void incrRefCount(robj *o) {
 }
 
 void decrRefCount(robj *o) {
+    //
     if (o->refcount == 1) {
         switch(o->type) {
         case OBJ_STRING: freeStringObject(o); break;
@@ -452,13 +466,22 @@ robj *tryObjectEncoding(robj *o) {
 
 /* Get a decoded version of an encoded object (returned as a new object).
  * If the object is already raw-encoded just increment the ref count. */
+/*
+ * 获取解码后的对象,还是返回1个robj结构对象
+ *
+ * 参数列表:
+ *      1、o: 待转换的结构体
+ */
 robj *getDecodedObject(robj *o) {
     robj *dec;
 
+    // list里面存的都是字符串
     if (sdsEncodedObject(o)) {
+        // 等于说是直接使用原来的值的引用,所以这里先将计数器加1,避免后面减1给释放了
         incrRefCount(o);
         return o;
     }
+    // 如果不是字符串的embstr或者rawstr存储的就转换为该类型
     if (o->type == OBJ_STRING && o->encoding == OBJ_ENCODING_INT) {
         char buf[32];
 
@@ -997,13 +1020,36 @@ sds getMemoryDoctorReport(void) {
 
 /* This is a helper function for the OBJECT command. We need to lookup keys
  * without any modification of LRU or other parameters. */
+/*
+ * object命令用于查看指定对象的情况,首先得找到这个对象
+ *
+ * 参数列表
+ *      1. c: 客户端指针,通过该指针查询当前使用的哈希表
+ *      2. key: 元素的key,也就是键值,Redis的K-V存储结构,一个K即可确定V
+ *
+ * 返回值
+ *      查找到的对象V的指针,或者不存在K的时候返回空
+ */
 robj *objectCommandLookup(client *c, robj *key) {
     dictEntry *de;
 
+    // 哈希表实际对应为K-bucket-entry形式,先查找entry
     if ((de = dictFind(c->db->dict,key->ptr)) == NULL) return NULL;
     return (robj*) dictGetVal(de);
 }
 
+/*
+ * 找到指定key对象V,如果不存在则响应默认值reply
+ *
+ * 参数列表
+ *      1. c: 客户端指针,用于定位当前使用的哈希表
+ *      2. key: Redis的K-V存储结构中的K,通过K来定位到唯一对象
+ *      3. reply: 当指定K不存在时的默认响应
+ *
+ * 返回值
+ *      指定key对应的对象V,当Redis不存在K对应元素时返回空
+ *
+ */
 robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply) {
     robj *o = objectCommandLookup(c,key);
 
@@ -1013,9 +1059,21 @@ robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply) {
 
 /* Object command allows to inspect the internals of an Redis Object.
  * Usage: OBJECT <refcount|encoding|idletime|freq> <key> */
+/*
+ * Redis客户端object命令的实现,有4个子命令
+ * refcount: key的引用计数
+ * encoding: 对应元素的存储实际实现方式
+ * idletime: key空转时间,即元素没有被访问或更新的时间
+ * freq: 访问的逻辑频繁度
+ *
+ * 参数列表:
+ *      1. c: 客户端指针
+ */
 void objectCommand(client *c) {
     robj *o;
 
+    // 执行object命令时,不论何种子命令,第一步都是查找传入参数key对应的对象V
+    // 之后则是根据不同当子命令再处理,除了帮助子命令help以外
     if (!strcasecmp(c->argv[1]->ptr,"help") && c->argc == 2) {
         void *blenp = addDeferredMultiBulkLength(c);
         int blen = 0;
@@ -1033,10 +1091,12 @@ void objectCommand(client *c) {
     } else if (!strcasecmp(c->argv[1]->ptr,"refcount") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
                 == NULL) return;
+        // 对象V的引用计数本身就存储在robj结构体中,直接响应即可
         addReplyLongLong(c,o->refcount);
     } else if (!strcasecmp(c->argv[1]->ptr,"encoding") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
                 == NULL) return;
+        // 对象的编码方式本身也存储在robj结构体中,将其映射为对应字符串输出
         addReplyBulkCString(c,strEncoding(o->encoding));
     } else if (!strcasecmp(c->argv[1]->ptr,"idletime") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
@@ -1045,6 +1105,7 @@ void objectCommand(client *c) {
             addReplyError(c,"An LFU maxmemory policy is selected, idle time not tracked. Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.");
             return;
         }
+        // Redis采用LFR的key淘汰策略时, robj结构体中存储了对象V最后一次访问时间lru
         addReplyLongLong(c,estimateObjectIdleTime(o)/1000);
     } else if (!strcasecmp(c->argv[1]->ptr,"freq") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
@@ -1057,6 +1118,11 @@ void objectCommand(client *c) {
          * in case of the key has not been accessed for a long time,
          * because we update the access time only
          * when the key is read or overwritten. */
+        // Redis采用LRU内存策略时,lru则存储的是逻辑访问频繁度
+        // 大致的说,在访问频率低于255时,存储的是实际访问的次数
+        // 一旦大于这个数则存储的是一个小于10的数字,表示频率很高了
+        // 另外由于只有在访问key时才会去更新key的访问频繁度
+        // 所以使用LFUDecrAndReturn机制防止长时间不访问导致却依旧频繁度很高
         addReplyLongLong(c,LFUDecrAndReturn(o));
     } else {
         addReplyErrorFormat(c, "Unknown subcommand or wrong number of arguments for '%s'. Try OBJECT help",
