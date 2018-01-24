@@ -1016,13 +1016,36 @@ sds getMemoryDoctorReport(void) {
 
 /* This is a helper function for the OBJECT command. We need to lookup keys
  * without any modification of LRU or other parameters. */
+/*
+ * object命令用于查看指定对象的情况,首先得找到这个对象
+ *
+ * 参数列表
+ *      1. c: 客户端指针,通过该指针查询当前使用的哈希表
+ *      2. key: 元素的key,也就是键值,Redis的K-V存储结构,一个K即可确定V
+ *
+ * 返回值
+ *      查找到的对象V的指针,或者不存在K的时候返回空
+ */
 robj *objectCommandLookup(client *c, robj *key) {
     dictEntry *de;
 
+    // 哈希表实际对应为K-bucket-entry形式,先查找entry
     if ((de = dictFind(c->db->dict,key->ptr)) == NULL) return NULL;
     return (robj*) dictGetVal(de);
 }
 
+/*
+ * 找到指定key对象V,如果不存在则响应默认值reply
+ *
+ * 参数列表
+ *      1. c: 客户端指针,用于定位当前使用的哈希表
+ *      2. key: Redis的K-V存储结构中的K,通过K来定位到唯一对象
+ *      3. reply: 当指定K不存在时的默认响应
+ *
+ * 返回值
+ *      指定key对应的对象V,当Redis不存在K对应元素时返回空
+ *
+ */
 robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply) {
     robj *o = objectCommandLookup(c,key);
 
@@ -1037,7 +1060,7 @@ robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply) {
  * refcount: key的引用计数
  * encoding: 对应元素的存储实际实现方式
  * idletime: key空转时间,即元素没有被访问或更新的时间
- * freq: 访问的频繁
+ * freq: 访问的逻辑频繁度
  *
  * 参数列表:
  *      1. c: 客户端指针
@@ -1045,13 +1068,17 @@ robj *objectCommandLookupOrReply(client *c, robj *key, robj *reply) {
 void objectCommand(client *c) {
     robj *o;
 
+    // 执行object命令时,不论何种子命令,第一步都是查找传入参数key对应的对象V
+    // 之后则是根据不同当子命令再处理
     if (!strcasecmp(c->argv[1]->ptr,"refcount") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
                 == NULL) return;
+        // 对象V的引用计数本身就存储在robj结构体中,直接响应即可
         addReplyLongLong(c,o->refcount);
     } else if (!strcasecmp(c->argv[1]->ptr,"encoding") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
                 == NULL) return;
+        // 对象的编码方式本身也存储在robj结构体中,将其映射为对应字符串输出
         addReplyBulkCString(c,strEncoding(o->encoding));
     } else if (!strcasecmp(c->argv[1]->ptr,"idletime") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
@@ -1060,6 +1087,7 @@ void objectCommand(client *c) {
             addReplyError(c,"An LFU maxmemory policy is selected, idle time not tracked. Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.");
             return;
         }
+        // Redis采用LFR的key淘汰策略时, robj结构体中存储了对象V最后一次访问时间lru
         addReplyLongLong(c,estimateObjectIdleTime(o)/1000);
     } else if (!strcasecmp(c->argv[1]->ptr,"freq") && c->argc == 3) {
         if ((o = objectCommandLookupOrReply(c,c->argv[2],shared.nullbulk))
@@ -1068,6 +1096,9 @@ void objectCommand(client *c) {
             addReplyError(c,"An LRU maxmemory policy is selected, access frequency not tracked. Please note that when switching between policies at runtime LRU and LFU data will take some time to adjust.");
             return;
         }
+        // Redis采用LRU内存策略时,lru则存储的是逻辑访问频繁度
+        // 大致的说,在访问频率低于255时,存储的是实际访问的次数
+        // 一旦大于这个数则存储的是一个小于10的数字,表示频率很高了
         addReplyLongLong(c,o->lru&255);
     } else {
         addReplyError(c,"Syntax error. Try OBJECT (refcount|encoding|idletime|freq)");
