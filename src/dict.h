@@ -66,16 +66,27 @@ typedef struct dictType {
 
 /* This is our hash table structure. Every dictionary has two of this as we
  * implement incremental rehashing, for the old to the new table. */
+/*
+ * Redis字典结构实现中的哈希表,每个字典有两张哈希表
+ */
 typedef struct dictht {
+    // 哈希表采用哈希值定位桶(一位数组),使用链表解决哈希冲突(二维数组)
     dictEntry **table;
+    // 哈希表桶的数量,为2的倍数
     unsigned long size;
+    // 值为size-1,用于键K哈希之后取 hash(K) & sizemask 获取放置桶的位置
     unsigned long sizemask;
+    // 当前哈希表中有多少个元素
     unsigned long used;
 } dictht;
 
+/*
+ * Redis字典结构
+ */
 typedef struct dict {
     dictType *type;
     void *privdata;
+    // 每个字典由两张哈希表组成
     dictht ht[2];
     long rehashidx; /* rehashing not in progress if rehashidx == -1 */
     unsigned long iterators; /* number of iterators currently running */

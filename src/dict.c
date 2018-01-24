@@ -69,6 +69,9 @@
  * Note that even when dict_can_resize is set to 0, not all resizes are
  * prevented: a hash table is still allowed to grow if the ratio between
  * the number of elements and the buckets > dict_force_resize_ratio. */
+/*
+ * 控制是否可以重哈希整个表的标记,主要通过dictEnableResize和dictDisableResize两个函数来修改
+ */
 static int dict_can_resize = 1;
 static unsigned int dict_force_resize_ratio = 5;
 

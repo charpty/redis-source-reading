@@ -203,14 +203,27 @@ void dbOverwrite(redisDb *db, robj *key, robj *val) {
  * 3) The expire time of the key is reset (the key is made persistent).
  *
  * All the new keys in the database should be craeted via this interface. */
+/*
+ * 通用的K-V设置函数,Redis属于K-V数据库所以这个函数贯穿各处,是存储设置的根本
+ *
+ * 参数列表
+ *      1. db: 要将键值对插入到哪一个db中,Redis默认启用0号db
+ *      2. key: 键K,在RedisDb中K-V都统一使用robj结构体存储
+ *      3. val: 值V
+ */
 void setKey(redisDb *db, robj *key, robj *val) {
+    // 存在即更新,不存在则插入
     if (lookupKeyWrite(db,key) == NULL) {
         dbAdd(db,key,val);
     } else {
         dbOverwrite(db,key,val);
     }
+    // 增加值的引用
     incrRefCount(val);
+    // 由于Redis是单线程设计,那么过期键清理操作只能分散到各个其他操作,每次设置值都会清理
+    // 这个清理是严格限制了在指定时间的,并不是一次性就扫描清理完,而是每次setKey都清理一小部分
     removeExpire(db,key);
+    // 响应Redis的watch指令,通知watch的客户端或改变watch状态
     signalModifiedKey(db,key);
 }
 
@@ -1339,7 +1352,7 @@ int *georadiusGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numk
     for (i = 5; i < argc; i++) {
         char *arg = argv[i]->ptr;
         /* For the case when user specifies both "store" and "storedist" options, the
-         * second key specified would override the first key. This behavior is kept 
+         * second key specified would override the first key. This behavior is kept
          * the same as in georadiusCommand method.
          */
         if ((!strcasecmp(arg, "store") || !strcasecmp(arg, "storedist")) && ((i+1) < argc)) {
@@ -1360,7 +1373,7 @@ int *georadiusGetKeys(struct redisCommand *cmd, robj **argv, int argc, int *numk
     if(num > 1) {
          keys[1] = stored_key;
     }
-    *numkeys = num; 
+    *numkeys = num;
     return keys;
 }
 

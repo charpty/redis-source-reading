@@ -93,6 +93,13 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
 }
 
 /* SET key value [NX] [XX] [EX <seconds>] [PX <milliseconds>] */
+/*
+ * set命令实现
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *
+ */
 void setCommand(client *c) {
     int j;
     robj *expire = NULL;
