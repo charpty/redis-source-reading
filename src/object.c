@@ -386,6 +386,15 @@ int isObjectRepresentableAsLongLong(robj *o, long long *llval) {
 }
 
 /* Try to encode a string object in order to save space */
+/*
+ * 根据字符串的长度采用不同的存储策略
+ *
+ * 参数列表
+ *      1. o: 原生的string结构体
+ *
+ * 返回值
+ *      按照原生string长度返回指定新robj结构体
+ */
 robj *tryObjectEncoding(robj *o) {
     long value;
     sds s = o->ptr;

@@ -34,6 +34,14 @@
  * String Commands
  *----------------------------------------------------------------------------*/
 
+/*
+ * string作为整个redis的K-V存储的核心: key存储方式, 对其长度是有限制的
+ *
+ * 参数列表
+ *      1. c: 待输出的客户端指针,用于出错时输出
+ *      2. size: 字符串的长度
+ *
+ */
 static int checkStringLength(client *c, long long size) {
     if (size > 512*1024*1024) {
         addReplyError(c,"string exceeds maximum allowed size (512MB)");
@@ -103,9 +111,12 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
 void setCommand(client *c) {
     int j;
     robj *expire = NULL;
+    // 默认单位是秒
     int unit = UNIT_SECONDS;
+    // 用于标记ex/px和nx/xx命令参数
     int flags = OBJ_SET_NO_FLAGS;
 
+    // 从前往后遍历参数后续参数 set a b xxx, xxx是第4个参数开始
     for (j = 3; j < c->argc; j++) {
         char *a = c->argv[j]->ptr;
         robj *next = (j == c->argc-1) ? NULL : c->argv[j+1];
@@ -142,6 +153,7 @@ void setCommand(client *c) {
         }
     }
 
+    // 处理string的实际存储类型,embstr、raw、int
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
