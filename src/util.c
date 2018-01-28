@@ -445,6 +445,7 @@ int string2ll(const char *s, size_t slen, long long *value) {
 int string2l(const char *s, size_t slen, long *lval) {
     long long llval;
 
+    // 先转换为64位长度longlong, 再看其值大小是否在long类型值域之间
     if (!string2ll(s,slen,&llval))
         return 0;
 
