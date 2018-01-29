@@ -72,10 +72,25 @@ static int checkStringLength(client *c, long long size) {
 #define OBJ_SET_EX (1<<2)     /* Set if time in seconds is given */
 #define OBJ_SET_PX (1<<3)     /* Set if time in ms in given */
 
+/*
+ * 通用set实现,实现了set操作公共逻辑
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. flags: set命令的参数,ex/px:过期时间是秒还是毫秒 nx/xx:存在则设置|不存在则设置
+ *      3. key: 键K
+ *      4. val: 值V
+ *      5. expire: 过期时间
+ *      6. unit: 过期时间单位,有秒和毫秒两种
+ *      7. ok_reply: 设置成功时的响应值
+ *      8. abort_reply: 设置失败时的响应值
+ */
 void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire, int unit, robj *ok_reply, robj *abort_reply) {
     long long milliseconds = 0; /* initialized to avoid any harmness warning */
 
+    // 如果要设置过期时间
     if (expire) {
+        // 先获取到具体的过期时间
         if (getLongLongFromObjectOrReply(c, expire, &milliseconds, NULL) != C_OK)
             return;
         if (milliseconds <= 0) {
@@ -85,18 +100,25 @@ void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire,
         if (unit == UNIT_SECONDS) milliseconds *= 1000;
     }
 
+    // 处理NX|EX命令,NX时如果存在则响应错误,EX时如果不存在则响应错误
     if ((flags & OBJ_SET_NX && lookupKeyWrite(c->db,key) != NULL) ||
         (flags & OBJ_SET_XX && lookupKeyWrite(c->db,key) == NULL))
     {
+        // 响应设定错误或默认错误
         addReply(c, abort_reply ? abort_reply : shared.nullbulk);
         return;
     }
+    // 调用通用的Redis的K-V设置
     setKey(c->db,key,val);
+    // 告诉持久化进程库中数据已被修改过
     server.dirty++;
+    // 设置好K-V之后,设置过期时间
     if (expire) setExpire(c,c->db,key,mstime()+milliseconds);
+    // 触发键修改事件,利用Redis的发布-订阅机制publish到指定频道
     notifyKeyspaceEvent(NOTIFY_STRING,"set",key,c->db->id);
     if (expire) notifyKeyspaceEvent(NOTIFY_GENERIC,
         "expire",key,c->db->id);
+    // 响应正确信息
     addReply(c, ok_reply ? ok_reply : shared.ok);
 }
 

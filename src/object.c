@@ -701,13 +701,26 @@ int getLongDoubleFromObjectOrReply(client *c, robj *o, long double *target, cons
     return C_OK;
 }
 
+/*
+ * 从robj对象中提取一个整数
+ *
+ * 参数列表
+ *      1. o: 包含整数的robj对象
+ *      2. target: 出参,取出的整数放在target中
+ *
+ * 返回值
+ *      取出整数设置成功返回0,失败返回-1
+ */
 int getLongLongFromObject(robj *o, long long *target) {
     long long value;
 
+    // o为NULL的时候返回0,这也是为了安全起见
     if (o == NULL) {
         value = 0;
     } else {
         serverAssertWithInfo(NULL,o,o->type == OBJ_STRING);
+        // 如果是使用RAW或embstr格式则转换为整数
+        // 如果本身字符串是使用int存储的则直接设置就行
         if (sdsEncodedObject(o)) {
             if (string2ll(o->ptr,sdslen(o->ptr),&value) == 0) return C_ERR;
         } else if (o->encoding == OBJ_ENCODING_INT) {
@@ -720,6 +733,18 @@ int getLongLongFromObject(robj *o, long long *target) {
     return C_OK;
 }
 
+/*
+ * 从robj对象中提取一个整数
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. o: 包含整数的robj对象
+ *      3. target: 出参,整数将被设置到target中
+ *      4. msg: 如果robj不包含整数或者转换错误,将输出该字符串错误信息
+ *
+ * 返回值
+ *      设置成功返回0,失败返回-1
+ */
 int getLongLongFromObjectOrReply(client *c, robj *o, long long *target, const char *msg) {
     long long value;
     if (getLongLongFromObject(o, &value) != C_OK) {
