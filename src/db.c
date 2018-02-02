@@ -143,7 +143,18 @@ robj *lookupKeyRead(redisDb *db, robj *key) {
  *
  * Returns the linked value object if the key exists or NULL if the key
  * does not exist in the specified DB. */
+/*
+ * 查找指定key的值robj，用于修改
+ *
+ * 参数列表
+ *      1. db: 指定的数据库，Redis默认0号数据库，可以使用select指定
+ *      2. key: 键K
+ *
+ * 返回值
+ *      指定key对应的值V,如果不存在或者键key已经过期则返回NULL
+ */
 robj *lookupKeyWrite(redisDb *db, robj *key) {
+    // 首先判断键key是不是已经在过期列表里
     expireIfNeeded(db,key);
     return lookupKey(db,key,LOOKUP_NONE);
 }

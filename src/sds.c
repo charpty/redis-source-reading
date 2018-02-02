@@ -486,14 +486,26 @@ void sdsIncrLen(sds s, ssize_t incr) {
  *
  * if the specified length is smaller than the current length, no operation
  * is performed. */
+/*
+ * 增长SDS到指定长度，增长的部分值全设置为0
+ *
+ * 参数列表
+ *      1. s: 待处理的SDS
+ *      2. len: 要增长到的长度len，如果小于原字符串长度则什么都不做
+ *
+ * 返回值
+ *      新的SDS或者不需要扩容则返回就是原SDS
+ */
 sds sdsgrowzero(sds s, size_t len) {
     size_t curlen = sdslen(s);
 
+    // 不需要扩容直接返回原SDS即可
     if (len <= curlen) return s;
     s = sdsMakeRoomFor(s,len-curlen);
     if (s == NULL) return NULL;
 
     /* Make sure added region doesn't contain garbage */
+    // 清理新增内存
     memset(s+curlen,0,(len-curlen+1)); /* also set trailing \0 byte */
     sdssetlen(s, len);
     return s;

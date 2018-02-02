@@ -180,31 +180,63 @@ void setCommand(client *c) {
     setGenericCommand(c,flags,c->argv[1],c->argv[2],expire,unit,NULL,NULL);
 }
 
+/*
+ * SETEX命令实现
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ */
 void setnxCommand(client *c) {
+    // 先对值进行编码
     c->argv[2] = tryObjectEncoding(c->argv[2]);
+    // 调用set函数通用逻辑
     setGenericCommand(c,OBJ_SET_NX,c->argv[1],c->argv[2],NULL,0,shared.cone,shared.czero);
 }
 
+/*
+ * SETEX命令实现
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ */
 void setexCommand(client *c) {
     c->argv[3] = tryObjectEncoding(c->argv[3]);
     setGenericCommand(c,OBJ_SET_NO_FLAGS,c->argv[1],c->argv[3],c->argv[2],UNIT_SECONDS,NULL,NULL);
 }
 
+/*
+ * SETEX的带设置过期时间(毫秒)版本实现
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ */
 void psetexCommand(client *c) {
     c->argv[3] = tryObjectEncoding(c->argv[3]);
     setGenericCommand(c,OBJ_SET_NO_FLAGS,c->argv[1],c->argv[3],c->argv[2],UNIT_MILLISECONDS,NULL,NULL);
 }
 
+/*
+ * GET命令的通用实现
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *
+ * 返回值
+ *      成功返回0，失败返回-1
+ */
 int getGenericCommand(client *c) {
     robj *o;
 
+    // 查找指定key，如果key不存在则响应信息"nil",返回0结束函数
     if ((o = lookupKeyReadOrReply(c,c->argv[1],shared.nullbulk)) == NULL)
         return C_OK;
 
+    // get命令只能作用于string类型
     if (o->type != OBJ_STRING) {
         addReply(c,shared.wrongtypeerr);
         return C_ERR;
     } else {
+        // 响应string信息到客户端
         addReplyBulk(c,o);
         return C_OK;
     }
@@ -214,71 +246,105 @@ void getCommand(client *c) {
     getGenericCommand(c);
 }
 
+/*
+ * GETSET命令实现,设置指定K的值，并返回旧值
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ */
 void getsetCommand(client *c) {
+    // 使用通用逻辑取指定K的值V
     if (getGenericCommand(c) == C_ERR) return;
+    // 编码值V并设置K-V
     c->argv[2] = tryObjectEncoding(c->argv[2]);
     setKey(c->db,c->argv[1],c->argv[2]);
+    // 通知指定key被改变
     notifyKeyspaceEvent(NOTIFY_STRING,"set",c->argv[1],c->db->id);
+    // 用于数据持久化
     server.dirty++;
 }
 
+/*
+ * SETRANGE命令的实现，设置某个key指定offset的值
+ * 响应客户端值是原字符串长度
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ */
 void setrangeCommand(client *c) {
     robj *o;
     long offset;
+    // 要设置的值
     sds value = c->argv[3]->ptr;
 
+    // 设置指定offset的key的值，所以先获取offset值
     if (getLongFromObjectOrReply(c,c->argv[2],&offset,NULL) != C_OK)
         return;
 
+    // 是不允许指定负数位置的，但可以设置大于指定key长度的值
+    // offset大于字符串长度的话将中间置0（有优化逻辑，并不是连续全部设0），并设置指定位置值
     if (offset < 0) {
         addReplyError(c,"offset is out of range");
         return;
     }
 
+    // 查找指定key对应的值对象结构体robj，不存在或过期都返回NULL
     o = lookupKeyWrite(c->db,c->argv[1]);
+    // 值V存在时
     if (o == NULL) {
         /* Return 0 when setting nothing on a non-existing string */
+        // 原字符串本来就是空的，要设置的值也是空的，直接返回原长度0
         if (sdslen(value) == 0) {
             addReply(c,shared.czero);
             return;
         }
 
         /* Return when the resulting string exceeds allowed size */
+        // 字符串长度不能长度512M
         if (checkStringLength(c,offset+sdslen(value)) != C_OK)
             return;
 
+        // 创建新string对象，由offset和待设值决定新字符串长度
         o = createObject(OBJ_STRING,sdsnewlen(NULL, offset+sdslen(value)));
         dbAdd(c->db,c->argv[1],o);
     } else {
         size_t olen;
 
         /* Key exists, check type */
+        // SETRANGE命令只能作用于string类型
         if (checkType(c,o,OBJ_STRING))
             return;
 
         /* Return existing string length when setting nothing */
+        // 先记录住原字符串长度，后续要响应给客户端
         olen = stringObjectLen(o);
         if (sdslen(value) == 0) {
+            // 如果不需要设置值,直接返回原长度即可
             addReplyLongLong(c,olen);
             return;
         }
 
         /* Return when the resulting string exceeds allowed size */
+        // 字符串长度不能长度512M
         if (checkStringLength(c,offset+sdslen(value)) != C_OK)
             return;
 
         /* Create a copy when the object is shared or encoded. */
+        // 如果是共享对象则创建一个拷贝
         o = dbUnshareStringValue(c->db,c->argv[1],o);
     }
 
     if (sdslen(value) > 0) {
+        // 需要设置值时，先确保字符串长度够用
         o->ptr = sdsgrowzero(o->ptr,offset+sdslen(value));
+        // 拷贝值到string指定offset位置
         memcpy((char*)o->ptr+offset,value,sdslen(value));
         signalModifiedKey(c->db,c->argv[1]);
         notifyKeyspaceEvent(NOTIFY_STRING,
             "setrange",c->argv[1],c->db->id);
         server.dirty++;
     }
+    // 返回新字符串长度
     addReplyLongLong(c,sdslen(o->ptr));
 }
 
