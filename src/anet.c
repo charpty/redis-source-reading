@@ -531,8 +531,10 @@ int anetUnixServer(char *err, char *path, mode_t perm, int backlog)
 static int anetGenericAccept(char *err, int s, struct sockaddr *sa, socklen_t *len) {
     int fd;
     while(1) {
+        // 调用网络IO标准函数
         fd = accept(s,sa,len);
         if (fd == -1) {
+            // 可能是系统繁忙产生的中断信号，重试
             if (errno == EINTR)
                 continue;
             else {
@@ -545,6 +547,19 @@ static int anetGenericAccept(char *err, int s, struct sockaddr *sa, socklen_t *l
     return fd;
 }
 
+/*
+ * 基于AF_INET(互联网地址)地址族的socket网络连接建立
+ *
+ * 参数列表
+ *      1. err: 出错时的错误信息格式化串
+ *      2. s:
+ *      3. ip:
+ *      4. ip_len:
+ *      5. port:
+ *
+ * 返回值
+ *      客户端网络IO的fd(类似句柄)
+ */
 int anetTcpAccept(char *err, int s, char *ip, size_t ip_len, int *port) {
     int fd;
     struct sockaddr_storage sa;

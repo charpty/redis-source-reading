@@ -546,9 +546,19 @@ void addReplyBulkLen(client *c, robj *obj) {
 }
 
 /* Add a Redis Object as a bulk reply */
+/*
+ * 将robj结构体以RESP协议中的Bulk String格式输出
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. obj: 待输出的对象
+ */
 void addReplyBulk(client *c, robj *obj) {
+    // Bulk String格式中的前缀长度头: $number
     addReplyBulkLen(c,obj);
+    // 实际字符串
     addReply(c,obj);
+    // 结束符: \r\n
     addReply(c,shared.crlf);
 }
 
@@ -672,6 +682,15 @@ static void acceptCommonHandler(int fd, int flags, char *ip) {
     c->flags |= flags;
 }
 
+/*
+ * 接收TCP连接并处理请求消息，将结果响应给客户端
+ *
+ * 参数列表
+ *      1. el:
+ *      2. fd:
+ *      3. privdata:
+ *      4. mask:
+ */
 void acceptTcpHandler(aeEventLoop *el, int fd, void *privdata, int mask) {
     int cport, cfd, max = MAX_ACCEPTS_PER_CALL;
     char cip[NET_IP_STR_LEN];
