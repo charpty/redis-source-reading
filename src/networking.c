@@ -1313,9 +1313,17 @@ int processMultibulkBuffer(client *c) {
  * more query buffer to process, because we read more data from the socket
  * or because a client was blocked and later reactivated, so there could be
  * pending query buffer, already representing a full command, to process. */
+/*
+ * 处理请求的字节流，这是Redis读取请求并处理命令的主要逻辑
+ *
+ * 参数列表
+ *      1. c: 客户端
+ *
+ */
 void processInputBuffer(client *c) {
     server.current_client = c;
     /* Keep processing while there is something in the input buffer */
+    // 只要字节流里还有内容
     while(sdslen(c->querybuf)) {
         /* Return if clients are paused. */
         if (!(c->flags & CLIENT_SLAVE) && clientsArePaused()) break;
@@ -1331,6 +1339,8 @@ void processInputBuffer(client *c) {
         if (c->flags & (CLIENT_CLOSE_AFTER_REPLY|CLIENT_CLOSE_ASAP)) break;
 
         /* Determine request type when unknown. */
+        // 通过字节流第一个字符来判断是什么格式，Redis只接收两种格式的命令
+        // 如果以'*'开头则代表是Bulk String数组，其它则都认为是内置命令格式
         if (!c->reqtype) {
             if (c->querybuf[0] == '*') {
                 c->reqtype = PROTO_REQ_MULTIBULK;
@@ -1339,6 +1349,7 @@ void processInputBuffer(client *c) {
             }
         }
 
+        // 根据不同类型调用不同的解析函数
         if (c->reqtype == PROTO_REQ_INLINE) {
             if (processInlineBuffer(c) != C_OK) break;
         } else if (c->reqtype == PROTO_REQ_MULTIBULK) {
