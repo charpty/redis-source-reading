@@ -1067,6 +1067,15 @@ void resetClient(client *c) {
  * have a well formed command. The function also returns C_ERR when there is
  * a protocol error: in such a case the client structure is setup to reply
  * with the error and close the connection. */
+/*
+ * 尝试解析字节流为内置命令，最重要的是解析出第一个单词(命令)
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *
+ * 返回值
+ *      解析成功返回0，解析失败或还未读取完成返回-1
+ */
 int processInlineBuffer(client *c) {
     char *newline;
     int argc, j;
@@ -1074,10 +1083,13 @@ int processInlineBuffer(client *c) {
     size_t querylen;
 
     /* Search for end of line */
+    // 实际上RESP协议定制的分隔符必须是'\r\n'，这也反应了协议的设计原则之一简单
     newline = strchr(c->querybuf,'\n');
 
     /* Nothing to do without a \r\n */
+    // 如果没有CRLF则直接认为这串字节流还未读取完成，返回-1并在外循环再读取
     if (newline == NULL) {
+        // 不能无休止读取字节流
         if (sdslen(c->querybuf) > PROTO_INLINE_MAX_SIZE) {
             addReplyError(c,"Protocol error: too big inline request");
             setProtocolError("too big inline request",c,0);
@@ -1086,14 +1098,20 @@ int processInlineBuffer(client *c) {
     }
 
     /* Handle the \r\n case. */
+    // 处理'\r\n'，newline往前移一个字符
     if (newline && newline != c->querybuf && *(newline-1) == '\r')
         newline--;
 
     /* Split the input buffer up to the \r\n */
+    // 计算实际有效字节流长度并将其转换SDS字符串
     querylen = newline-(c->querybuf);
     aux = sdsnewlen(c->querybuf,querylen);
+    // 将字符串分割为一组入参，该函数里包含了各种空格、水平制动符、换行符的处理
+    // RESP内置命令来讲就是以空格分割字符串，其中分割后的第一个字符串就是命令名称
+    // 后续也就是根据这个命令名称到'redisCommandTable'中查找具体命令执行函数
     argv = sdssplitargs(aux,&argc);
     sdsfree(aux);
+    // 这里设计就稍显丑陋了'sdssplitargs()'函数返回NULL时一定就是因为字符串中引号数量不对
     if (argv == NULL) {
         addReplyError(c,"Protocol error: unbalanced quotes in request");
         setProtocolError("unbalanced quotes in inline request",c,0);
@@ -1103,19 +1121,25 @@ int processInlineBuffer(client *c) {
     /* Newline from slaves can be used to refresh the last ACK time.
      * This is useful for a slave to ping back while loading a big
      * RDB file. */
+    // 空命令被设定为从节点向主节点更新最后ACK时间的一种手段
     if (querylen == 0 && c->flags & CLIENT_SLAVE)
         c->repl_ack_time = server.unixtime;
 
     /* Leave data after the first line of the query in the buffer */
+    // 可以使用'\r\n'分割一次性传递多个命令过来
+    // 所以丢弃掉已处理完成的字符串，再次走外循环处理剩下的
     sdsrange(c->querybuf,querylen+2,-1);
 
     /* Setup argv array on client structure */
+    // 如果解析出来的参数不为空则将参数转换为robj结构体
+    // Redis中的键、值、参数、配置等都是使用robj结构体表示，用于提高操作灵活度和编程通用性
     if (argc) {
         if (c->argv) zfree(c->argv);
         c->argv = zmalloc(sizeof(robj*)*argc);
     }
 
     /* Create redis objects for all arguments. */
+    // 循环将参数转换为robj结构体，方便后续操作
     for (c->argc = 0, j = 0; j < argc; j++) {
         if (sdslen(argv[j])) {
             c->argv[c->argc] = createObject(OBJ_STRING,argv[j]);
@@ -1124,6 +1148,7 @@ int processInlineBuffer(client *c) {
             sdsfree(argv[j]);
         }
     }
+    // 释放SDS数组
     zfree(argv);
     return C_OK;
 }
@@ -1170,18 +1195,34 @@ static void setProtocolError(const char *errstr, client *c, long pos) {
  * This function is called if processInputBuffer() detects that the next
  * command is in RESP format, so the first byte in the command is found
  * to be '*'. Otherwise for inline commands processInlineBuffer() is called. */
+/*
+ * 解析普通Redis命令，普通命令格式为: Bulk String数组，这是RESP协议中的一种标准格式
+ * 当字节流第一个字节为'*'时就认为是普通命令，也就会调用该函数来尝试解析参数
+ * 读这一部分首先需要了解下什么是RESP协议，可以看下我的博客charpty.com
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *
+ * 返回值
+ *      解析成功返回0，解析失败或还未读取完成-1
+ */
 int processMultibulkBuffer(client *c) {
     char *newline = NULL;
     long pos = 0;
     int ok;
     long long ll;
 
+    // 外循环的第一次读取字节流
     if (c->multibulklen == 0) {
         /* The client should have been reset */
+        // 都还未读取过，c->argc当然是0
         serverAssertWithInfo(c,NULL,c->argc == 0);
 
         /* Multi bulk length cannot be read without a \r\n */
+        // 不论是内置命令还是RESP任何传输格式，都是使用'\r\n'作为分割
+        // 使用单'\n'或者'\n\r'等都会引发不可预料的异常
         newline = strchr(c->querybuf,'\r');
+        // 和内置命令一样，未读取完则返回让外循环继续读取，但限制最大读取长度
         if (newline == NULL) {
             if (sdslen(c->querybuf) > PROTO_INLINE_MAX_SIZE) {
                 addReplyError(c,"Protocol error: too big mbulk count string");
@@ -1196,7 +1237,9 @@ int processMultibulkBuffer(client *c) {
 
         /* We know for sure there is a whole line since newline != NULL,
          * so go ahead and find out the multi bulk length. */
+        // 调这个函数了，第一个字节当然是'*'
         serverAssertWithInfo(c,NULL,c->querybuf[0] == '*');
+        // 解析实际命令长度，也就是第一行中'*'号的数字，最长为1M个元素
         ok = string2ll(c->querybuf+1,newline-(c->querybuf+1),&ll);
         if (!ok || ll > 1024*1024) {
             addReplyError(c,"Protocol error: invalid multibulk length");
@@ -1205,21 +1248,27 @@ int processMultibulkBuffer(client *c) {
         }
 
         pos = (newline-c->querybuf)+2;
+        // 这一个普通命令是个空命令，直接跳过
         if (ll <= 0) {
+            // 去除掉已经解析过的字节，让外循环开始解析接下来的字节
             sdsrange(c->querybuf,pos,-1);
             return C_OK;
         }
 
+        // 整个if逻辑最重要的就是计算出整个数组有多少个元素
         c->multibulklen = ll;
 
         /* Setup argv array on client structure */
         if (c->argv) zfree(c->argv);
+        // 请求数组元素的个数也就是请求参数的个数
         c->argv = zmalloc(sizeof(robj*)*c->multibulklen);
     }
 
     serverAssertWithInfo(c,NULL,c->multibulklen > 0);
+    // 循环处理各个元素，也就是各Bulk Strings
     while(c->multibulklen) {
         /* Read bulk length if unknown */
+        // 读取Bulk Strings的实际字符串长度，也就是该元素第一行'$'符号后面的数字
         if (c->bulklen == -1) {
             newline = strchr(c->querybuf+pos,'\r');
             if (newline == NULL) {
@@ -1233,9 +1282,11 @@ int processMultibulkBuffer(client *c) {
             }
 
             /* Buffer should also contain \n */
+            // '\r\n'，不重复讲了
             if (newline-(c->querybuf) > ((signed)sdslen(c->querybuf)-2))
                 break;
 
+            // 元素必须是Bulk Strings，也就是必须'$'开头
             if (c->querybuf[pos] != '$') {
                 addReplyErrorFormat(c,
                     "Protocol error: expected '$', got '%c'",
@@ -1244,6 +1295,7 @@ int processMultibulkBuffer(client *c) {
                 return C_ERR;
             }
 
+            // 把Bulk Strings格式的长度读出来，这样可以一次性就取出实际字符串
             ok = string2ll(c->querybuf+pos+1,newline-(c->querybuf+pos+1),&ll);
             if (!ok || ll < 0 || ll > server.proto_max_bulk_len) {
                 addReplyError(c,"Protocol error: invalid bulk length");
@@ -1252,6 +1304,7 @@ int processMultibulkBuffer(client *c) {
             }
 
             pos += newline-(c->querybuf+pos)+2;
+            // 当发现字符串的长度值很大(大于64K)，为了防止拷贝则直接使用buffer中的字节
             if (ll >= PROTO_MBULK_BIG_ARG) {
                 size_t qblen;
 
@@ -1259,11 +1312,13 @@ int processMultibulkBuffer(client *c) {
                  * try to make it likely that it will start at c->querybuf
                  * boundary so that we can optimize object creation
                  * avoiding a large copy of data. */
+                // 将当前字符串起以及后面的其它全部字节作为一个新的SDS
                 sdsrange(c->querybuf,pos,-1);
                 pos = 0;
                 qblen = sdslen(c->querybuf);
                 /* Hint the sds library about the amount of bytes this string is
                  * going to contain. */
+                // 除了字符串本身还需要存放'\r\n'
                 if (qblen < (size_t)ll+2)
                     c->querybuf = sdsMakeRoomFor(c->querybuf,ll+2-qblen);
             }
@@ -1278,6 +1333,9 @@ int processMultibulkBuffer(client *c) {
             /* Optimization: if the buffer contains JUST our bulk element
              * instead of creating a new object by *copying* the sds we
              * just use the current sds string. */
+            // 如果说恰好当前buffer仅剩下一个元素，且是个较长的字符串
+            // 那么就直接使用buffer来表示字符串，形成robj结构体，避免内存拷贝
+            // 这种场景还是比较常见的，所以可能长的参数尽量放在最后一个
             if (pos == 0 &&
                 c->bulklen >= PROTO_MBULK_BIG_ARG &&
                 sdslen(c->querybuf) == (size_t)(c->bulklen+2))
@@ -1286,10 +1344,12 @@ int processMultibulkBuffer(client *c) {
                 sdsIncrLen(c->querybuf,-2); /* remove CRLF */
                 /* Assume that if we saw a fat argument we'll see another one
                  * likely... */
+                // 预测下一个元素也是类似的场景
                 c->querybuf = sdsnewlen(NULL,c->bulklen+2);
                 sdsclear(c->querybuf);
                 pos = 0;
             } else {
+                // 直接将buffer中字节拷贝出来构建新的robj结构体
                 c->argv[c->argc++] =
                     createStringObject(c->querybuf+pos,c->bulklen);
                 pos += c->bulklen+2;
@@ -1300,12 +1360,15 @@ int processMultibulkBuffer(client *c) {
     }
 
     /* Trim to pos */
+    // 保证丢弃调已经处理过的字节
     if (pos) sdsrange(c->querybuf,pos,-1);
 
     /* We're done when c->multibulk == 0 */
+    // 如果数组里的元素都处理完毕返回0，否则代表还剩余元素没处理完
     if (c->multibulklen == 0) return C_OK;
 
     /* Still not ready to process the command */
+    // 继续回到外循环接着处理
     return C_ERR;
 }
 
