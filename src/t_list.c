@@ -434,17 +434,21 @@ void lrangeCommand(client *c) {
     rangelen = (end-start)+1;
 
     /* Return the result in form of a multi-bulk reply */
+    // 先设置好RESP协议传输格式Arrays数组的长度
     addReplyMultiBulkLen(c,rangelen);
     if (o->encoding == OBJ_ENCODING_QUICKLIST) {
         listTypeIterator *iter = listTypeInitIterator(o, start, LIST_TAIL);
 
+        // 然后一个个输出Bulk Strings元素
         while(rangelen--) {
             listTypeEntry entry;
             listTypeNext(iter, &entry);
             quicklistEntry *qe = &entry.entry;
             if (qe->value) {
+                // 输出字符串实际值
                 addReplyBulkCBuffer(c,qe->value,qe->sz);
             } else {
+                // 如果是输出大字符串前缀长度,$number
                 addReplyBulkLongLong(c,qe->longval);
             }
         }

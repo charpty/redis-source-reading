@@ -344,16 +344,25 @@ void addReply(client *c, robj *obj) {
     }
 }
 
+/*
+ * 将一个SDS中的字符串给客户端，并释放SDS所占内存
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. s: 待输出的字符串
+ */
 void addReplySds(client *c, sds s) {
     if (prepareClientToWrite(c) != C_OK) {
         /* The caller expects the sds to be free'd. */
         sdsfree(s);
         return;
     }
+    // 该函数就是将字符原模原样输出到输出channel的buffer
     if (_addReplyToBuffer(c,s,sdslen(s)) == C_OK) {
         sdsfree(s);
     } else {
         /* This method free's the sds when it is no longer needed. */
+        // 暂存在客户端的reply属性中，等待下一次可传输时再传输并释放SDS
         _addReplySdsToList(c,s);
     }
 }
@@ -398,9 +407,20 @@ void addReplyErrorFormat(client *c, const char *fmt, ...) {
     sdsfree(s);
 }
 
+/*
+ * 输出RESP的Simple Strings格式
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. s: 待输出的字符串
+ *      3. len: 待输出字符串长度
+ */
 void addReplyStatusLength(client *c, const char *s, size_t len) {
+    // 输出标志位'+'
     addReplyString(c,"+",1);
+    // 将字符串写到buffer
     addReplyString(c,s,len);
+    // 输出末尾结束符
     addReplyString(c,"\r\n",2);
 }
 
@@ -512,6 +532,13 @@ void addReplyLongLong(client *c, long long ll) {
         addReplyLongLongWithPrefix(c,ll,':');
 }
 
+/*
+ * 输出RESP协议的Bulk Strings数组
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. length: 数组长度
+ */
 void addReplyMultiBulkLen(client *c, long length) {
     if (length < OBJ_SHARED_BULKHDR_LEN)
         addReply(c,shared.mbulkhdr[length]);
@@ -570,9 +597,20 @@ void addReplyBulkCBuffer(client *c, const void *p, size_t len) {
 }
 
 /* Add sds to reply (takes ownership of sds and frees it) */
+/*
+ * 组装Bulk Strings格式输出到客户端
+ *
+ * 参数列表
+ *      1. c: 客户端指针
+ *      2. s: 待输出的大字符串
+ */
 void addReplyBulkSds(client *c, sds s)  {
+    // 首先添加第一行，表明大字符串的长度，如"$27"表示实际字符串有27个字节
     addReplyLongLongWithPrefix(c,sdslen(s),'$');
+    // 将字符串原模原样写出输出buffer中
+    // 其调用的是更底层的字节输出函数addReplyBulkCBuffer()
     addReplySds(c,s);
+    // 添加末尾的'\r\n'
     addReply(c,shared.crlf);
 }
 
