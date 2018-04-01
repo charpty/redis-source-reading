@@ -592,15 +592,25 @@ int ld2string(char *buf, size_t len, long double value, int humanfriendly) {
  * given execution of Redis, so that if you are talking with an instance
  * having run_id == A, and you reconnect and it has run_id == B, you can be
  * sure that it is either a different instance or it was restarted. */
+/*
+ * 产生一串身份码用于唯一表示一个运行中的Redis实例
+ *
+ * 参数列表
+ *      1. p: 出参，输出身份码到p
+ *      2. len: 出参长度，即身份码输出的左前缀长度
+ */
 void getRandomHexChars(char *p, unsigned int len) {
     char *charset = "0123456789abcdef";
     unsigned int j;
 
     /* Global state. */
+    // 全局状态,一次运行实例有且仅有一个身份码
     static int seed_initialized = 0;
+    // 从/dev/urandom输出的随机种子
     static unsigned char seed[20]; /* The SHA1 seed, from /dev/urandom. */
     static uint64_t counter = 0; /* The counter we hash with the seed. */
 
+    // 第一次调用时初始化种子
     if (!seed_initialized) {
         /* Initialize a seed and use SHA1 in counter mode, where we hash
          * the same seed with a progressive counter. For the goals of this
@@ -616,8 +626,10 @@ void getRandomHexChars(char *p, unsigned int len) {
         while(len) {
             unsigned char digest[20];
             SHA1_CTX ctx;
+            // 一次最多输出20位
             unsigned int copylen = len > 20 ? 20 : len;
 
+            // 调用SHA1做散列
             SHA1Init(&ctx);
             SHA1Update(&ctx, seed, sizeof(seed));
             SHA1Update(&ctx, (unsigned char*)&counter,sizeof(counter));
@@ -626,6 +638,7 @@ void getRandomHexChars(char *p, unsigned int len) {
 
             memcpy(p,digest,copylen);
             /* Convert to hex digits. */
+            // 以散列值做下标取16进制值
             for (j = 0; j < copylen; j++) p[j] = charset[p[j] & 0x0F];
             len -= copylen;
             p += copylen;
@@ -634,6 +647,8 @@ void getRandomHexChars(char *p, unsigned int len) {
         /* If we can't read from /dev/urandom, do some reasonable effort
          * in order to create some entropy, since this function is used to
          * generate run_id and cluster instance IDs */
+        // 这是未能从/dev/urandom读取随机数时的场景
+        // 由于身份码是众多场景下必须的，所以这里根据时间和进程ID来生成一个
         char *x = p;
         unsigned int l = len;
         struct timeval tv;
@@ -641,21 +656,25 @@ void getRandomHexChars(char *p, unsigned int len) {
 
         /* Use time and PID to fill the initial array. */
         gettimeofday(&tv,NULL);
+        // 先用微秒来填充
         if (l >= sizeof(tv.tv_usec)) {
             memcpy(x,&tv.tv_usec,sizeof(tv.tv_usec));
             l -= sizeof(tv.tv_usec);
             x += sizeof(tv.tv_usec);
         }
+        // 还不够则用秒来填充
         if (l >= sizeof(tv.tv_sec)) {
             memcpy(x,&tv.tv_sec,sizeof(tv.tv_sec));
             l -= sizeof(tv.tv_sec);
             x += sizeof(tv.tv_sec);
         }
+        // 再不够则使用进程ID来填充
         if (l >= sizeof(pid)) {
             memcpy(x,&pid,sizeof(pid));
             l -= sizeof(pid);
             x += sizeof(pid);
         }
+        // 最后只能使用随机数了
         /* Finally xor it with rand() output, that was already seeded with
          * time() at startup, and convert to hex digits. */
         for (j = 0; j < len; j++) {

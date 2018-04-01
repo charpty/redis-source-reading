@@ -1339,6 +1339,9 @@ void createSharedObjects(void) {
     shared.maxstring = sdsnew("maxstring");
 }
 
+/*
+ * 初始化各种配置项的默认值
+ */
 void initServerConfig(void) {
     int j;
 
@@ -3734,13 +3737,17 @@ int main(int argc, char **argv) {
     gettimeofday(&tv,NULL);
     char hashseed[16];
     getRandomHexChars(hashseed,sizeof(hashseed));
+    // 初始化Hash函数种子，将通过hashseed字符串来构建siphash函数
     dictSetHashFunctionSeed((uint8_t*)hashseed);
+    // 检测是否为哨兵模式
     server.sentinel_mode = checkForSentinelMode(argc,argv);
     initServerConfig();
+    // 初始化模块化系统，众多命令实现都通过模块集成进来（部分初始化操作还是硬代码）
     moduleInitModulesSystem();
 
     /* Store the executable path and arguments in a safe place in order
      * to be able to restart the server later. */
+    // 获取运行时的执行文件路径、运行时参数等信息,用于info命令显示
     server.executable = getAbsolutePath(argv[0]);
     server.exec_argv = zmalloc(sizeof(char*)*(argc+1));
     server.exec_argv[argc] = NULL;

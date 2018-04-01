@@ -90,6 +90,9 @@ void dictSetHashFunctionSeed(uint8_t *seed) {
     memcpy(dict_hash_function_seed,seed,sizeof(dict_hash_function_seed));
 }
 
+/*
+ * 设置hash函数随机种子，将作为siphash的初始值
+ */
 uint8_t *dictGetHashFunctionSeed(void) {
     return dict_hash_function_seed;
 }

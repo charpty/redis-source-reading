@@ -182,6 +182,7 @@ void loadServerConfigFromString(char *config) {
         int argc;
 
         linenum = i+1;
+        // 去除行中这4种字符
         lines[i] = sdstrim(lines[i]," \t\r\n");
 
         /* Skip comments and blank lines */

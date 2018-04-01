@@ -1000,6 +1000,19 @@ int sdscmp(const sds s1, const sds s2) {
  * requires length arguments. sdssplit() is just the
  * same function but for zero-terminated strings.
  */
+/*
+ * 以指定分隔符切割字符串
+ *
+ * 参数列表
+ *      1. s: 待切割的字符串
+ *      2. len: 待切割字符串长度
+ *      3. sep: 分隔符
+ *      4. seplen: 分隔符长度
+ *      5. count: 出参，分割得到的字符串个数,即结果数组长度
+ *
+ * 返回值
+ *      分割后的字符串数组
+ */
 sds *sdssplitlen(const char *s, ssize_t len, const char *sep, int seplen, int *count) {
     int elements = 0, slots = 5;
     long start = 0, j;
