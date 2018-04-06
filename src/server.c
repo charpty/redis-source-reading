@@ -2662,14 +2662,22 @@ void authCommand(client *c) {
 
 /* The PING command. It works in a different way if the client is in
  * in Pub/Sub mode. */
+/*
+ * PING命令实现
+ */
 void pingCommand(client *c) {
     /* The command takes zero or one arguments. */
+    // PING命令可以有一个参数字符串，PING命令使用该参数作为返回值，类似PING
+    // 没有传递参数时返回默认PONG字符串
     if (c->argc > 2) {
         addReplyErrorFormat(c,"wrong number of arguments for '%s' command",
             c->cmd->name);
         return;
     }
 
+    // 如果客户端有订阅某个频道，那么返回值总是以数组形式出现
+    // 数组第一个值固定为PONG，第二个值则为第一个参数值
+    // TODO but why??
     if (c->flags & CLIENT_PUBSUB) {
         addReply(c,shared.mbulkhdr[2]);
         addReplyBulkCBuffer(c,"pong",4);
@@ -2685,10 +2693,16 @@ void pingCommand(client *c) {
     }
 }
 
+/*
+ * ECHO命令实现
+ */
 void echoCommand(client *c) {
     addReplyBulk(c,c->argv[1]);
 }
 
+/*
+ * TIME命令实现
+ */
 void timeCommand(client *c) {
     struct timeval tv;
 
@@ -2696,7 +2710,9 @@ void timeCommand(client *c) {
      * don't check for errors. */
     gettimeofday(&tv,NULL);
     addReplyMultiBulkLen(c,2);
+    // 秒数
     addReplyBulkLongLong(c,tv.tv_sec);
+    // 微秒数
     addReplyBulkLongLong(c,tv.tv_usec);
 }
 
