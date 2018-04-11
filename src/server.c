@@ -58,6 +58,7 @@
 
 /* Our shared "common" objects */
 
+// Redis全局的各类共享变量,最常见的就是ok、pong等字符串对象
 struct sharedObjectsStruct shared;
 
 /* Global vars that are actually used as constants. The following double
@@ -75,43 +76,66 @@ volatile unsigned long lru_clock; /* Server global current LRU time. */
 /* Our command table.
  *
  * Every entry is composed of the following fields:
+ * 每个命令entry都包含以下组件, 参见redisComand结构体
  *
+ * 1. 表示command的唯一名称
  * name: a string representing the command name.
+ * 2. 函数指针，指向具体实现该命令的参数
  * function: pointer to the C function implementing the command.
+ * 3. 参数数量
  * arity: number of arguments, it is possible to use -N to say >= N
+ * 4. 命令属性标志，使用单个字节表示一个属性
  * sflags: command flags as string. See below for a table of flags.
+ * 5. 实际的属性标记位，是个位标记，Redis在启动时计算
  * flags: flags as bitmask. Computed by Redis using the 'sflags' field.
+ * 6.
  * get_keys_proc: an optional function to get key arguments from a command.
  *                This is only used when the following three fields are not
  *                enough to specify what arguments are keys.
+ * 7. 请求参数第几个开始作为key
  * first_key_index: first argument that is a key
+ * 8. 请求参数最后一个key的下标位置
  * last_key_index: last argument that is a key
+ * 9. key之间的间隔距离
  * key_step: step to get all the keys from first to last argument. For instance
  *           in MSET the step is two since arguments are key,val,key,val,...
+ * 10. 该命令总共的执行时间，单位微秒，运行中计算
  * microseconds: microseconds of total execution time for this command.
+ * 11. 该命令被执行的次数,运行中计算
  * calls: total number of calls of this command.
  *
+ * 实际标记位、总执行时间、总调用次数都由Redis运行时设置，默认设置为0
  * The flags, microseconds and calls fields are computed by Redis and should
  * always be set to zero.
  *
+ * populateCommandTable()函数负责将字符串的属性标记转换为位标记
  * Command flags are expressed using strings where every character represents
  * a flag. Later the populateCommandTable() function will take care of
  * populating the real 'flags' field using this characters.
  *
  * This is the meaning of the flags:
  *
+ * w表示命令可能会改变数据库键值对
  * w: write command (may modify the key space).
+ * r表示只读命令
  * r: read command  (will never modify the key space).
+ * m表示会增加内存使用量
  * m: may increase memory usage once called. Don't allow if out of memory.
+ * a表示管理型命令
  * a: admin command, like SAVE or SHUTDOWN.
+ * p表示发布订阅命令
  * p: Pub/Sub related command.
  * f: force replication of this command, regardless of server.dirty.
+ * s表示命令无法在脚本中执行
  * s: command not allowed in scripts.
+ * R表示命令执行结果非幂等，是随机结果
  * R: random command. Command is not deterministic, that is, the same command
  *    with the same arguments, with the same key space, may have different
  *    results. For instance SPOP and RANDOMKEY are two random commands.
+ * S表示命令输出结果顺序确定
  * S: Sort command output array if called from script, so that the output
  *    is deterministic.
+ * l表示命令可以在加载db的过程中执行
  * l: Allow command while loading the database.
  * t: Allow command while a slave has stale data but is not allowed to
  *    server this data. Normally no command is accepted in this condition
@@ -119,11 +143,13 @@ volatile unsigned long lru_clock; /* Server global current LRU time. */
  * M: Do not automatically propagate the command on MONITOR.
  * k: Perform an implicit ASKING for this command, so the command will be
  *    accepted in cluster mode if the slot is marked as 'importing'.
+ * F表示命令执行时间很短不会造成阻塞，可以在一次循环事件中处理完
  * F: Fast command: O(1) or O(log(N)) command that should never delay
  *    its execution as long as the kernel scheduler is giving us time.
  *    Note that commands that may trigger a DEL as a side effect (like SET)
  *    are not fast commands.
  */
+// redis的命令映射表
 struct redisCommand redisCommandTable[] = {
     {"module",moduleCommand,-2,"as",0,NULL,1,1,1,0,0},
     {"get",getCommand,2,"rF",0,NULL,1,1,1,0,0},
