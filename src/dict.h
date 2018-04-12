@@ -55,11 +55,15 @@ typedef struct dictEntry {
     struct dictEntry *next;
 } dictEntry;
 
+// 初始化哈希表时所需的各类函数指针集合
 typedef struct dictType {
+    // 哈希Key的函数
     uint64_t (*hashFunction)(const void *key);
     void *(*keyDup)(void *privdata, const void *key);
     void *(*valDup)(void *privdata, const void *obj);
+    // Key的比较函数
     int (*keyCompare)(void *privdata, const void *key1, const void *key2);
+    // 键与值的析构函数
     void (*keyDestructor)(void *privdata, void *key);
     void (*valDestructor)(void *privdata, void *obj);
 } dictType;

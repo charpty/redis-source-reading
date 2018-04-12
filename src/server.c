@@ -337,23 +337,34 @@ struct redisCommand redisCommandTable[] = {
 
 /* Low level logging. To use only for very big messages, otherwise
  * serverLog() is to prefer. */
+/*
+ * 输出较长的服务器日志
+ *
+ * 参数列表
+ *      1. level: 日志级别
+ *      2. msg: 日志内容
+ */
 void serverLogRaw(int level, const char *msg) {
+    // 一共四种级别，服务器级别ERROR是直接退出
     const int syslogLevelMap[] = { LOG_DEBUG, LOG_INFO, LOG_NOTICE, LOG_WARNING };
     const char *c = ".-*#";
     FILE *fp;
     char buf[64];
+    // 是否直接原样输出
     int rawmode = (level & LL_RAW);
     int log_to_stdout = server.logfile[0] == '\0';
 
     level &= 0xff; /* clear flags */
     if (level < server.verbosity) return;
 
+    // 标准输出或者输出到日志文件
     fp = log_to_stdout ? stdout : fopen(server.logfile,"a");
     if (!fp) return;
 
     if (rawmode) {
         fprintf(fp,"%s",msg);
     } else {
+        // 构建一个含线程ID、示例角色属性、时间戳、日志级别的日志信息
         int off;
         struct timeval tv;
         int role_char;
@@ -375,16 +386,21 @@ void serverLogRaw(int level, const char *msg) {
     fflush(fp);
 
     if (!log_to_stdout) fclose(fp);
+    // 记录syslog
     if (server.syslog_enabled) syslog(syslogLevelMap[level], "%s", msg);
 }
 
 /* Like serverLogRaw() but with printf-alike support. This is the function that
  * is used across the code. The raw version is only used in order to dump
  * the INFO output on crash. */
+/*
+ * 和serverLogRaw()类似，只是该函数自带format功能
+ */
 void serverLog(int level, const char *fmt, ...) {
     va_list ap;
     char msg[LOG_MAX_LEN];
 
+    // 根据Redis当前的日志级别判断是否需要输出日志
     if ((level&0xff) < server.verbosity) return;
 
     va_start(ap, fmt);
@@ -400,6 +416,9 @@ void serverLog(int level, const char *fmt, ...) {
  * We actually use this only for signals that are not fatal from the point
  * of view of Redis. Signals that are going to kill the server anyway and
  * where we need printf-alike features are served by serverLog(). */
+/*
+ * 输出一个定长消息
+ */
 void serverLogFromHandler(int level, const char *msg) {
     int fd;
     int log_to_stdout = server.logfile[0] == '\0';
@@ -423,6 +442,7 @@ err:
 }
 
 /* Return the UNIX time in microseconds */
+// 微秒
 long long ustime(void) {
     struct timeval tv;
     long long ust;
@@ -434,6 +454,7 @@ long long ustime(void) {
 }
 
 /* Return the UNIX time in milliseconds */
+// 毫秒
 mstime_t mstime(void) {
     return ustime()/1000;
 }
@@ -456,6 +477,7 @@ void exitFromChild(int retcode) {
  * keys and redis objects as values (objects can hold SDS strings,
  * lists, sets). */
 
+// 各类哈希表的dictType初始化
 void dictVanillaFree(void *privdata, void *val)
 {
     DICT_NOTUSED(privdata);
@@ -490,6 +512,7 @@ int dictSdsKeyCaseCompare(void *privdata, const void *key1,
     return strcasecmp(key1, key2) == 0;
 }
 
+// 各类析构函数
 void dictObjectDestructor(void *privdata, void *val)
 {
     DICT_NOTUSED(privdata);
@@ -897,10 +920,15 @@ void clientsCron(void) {
 /* This function handles 'background' operations we are required to do
  * incrementally in Redis databases, such as active key expiring, resizing,
  * rehashing. */
+/*
+ * Redis DB操作相关的调度任务
+ */
 void databasesCron(void) {
     /* Expire keys by random sampling. Not required for slaves
      * as master will synthesize DELs for us. */
+    // 随机触发删除过期key
     if (server.active_expire_enabled && server.masterhost == NULL) {
+        // 主节点才触发删除过期key动作
         activeExpireCycle(ACTIVE_EXPIRE_CYCLE_SLOW);
     } else if (server.masterhost != NULL) {
         expireSlaveKeys();
@@ -919,6 +947,7 @@ void databasesCron(void) {
          * cron loop iteration. */
         static unsigned int resize_db = 0;
         static unsigned int rehash_db = 0;
+        // 有多少个数据库，默认有16个
         int dbs_per_call = CRON_DBS_PER_CALL;
         int j;
 
@@ -926,15 +955,18 @@ void databasesCron(void) {
         if (dbs_per_call > server.dbnum) dbs_per_call = server.dbnum;
 
         /* Resize */
+        // 查看db（实际上就是一个哈希表）是否需要扩展
         for (j = 0; j < dbs_per_call; j++) {
             tryResizeHashTables(resize_db % server.dbnum);
             resize_db++;
         }
 
         /* Rehash */
+        // 查看是否有分库需要rehash，每次只rehash一个库的部分键
         if (server.activerehashing) {
             for (j = 0; j < dbs_per_call; j++) {
                 int work_done = incrementallyRehash(rehash_db);
+                // 当前库有做rehash工作那么就结束rehash工作，如果没有则尝试下一个库
                 if (work_done) {
                     /* If the function did some work, stop here, we'll do
                      * more at the next cron loop. */
