@@ -591,6 +591,7 @@ uint64_t dictEncObjHash(const void *key) {
 
 /* Generic hash table type where keys are Redis Objects, Values
  * dummy pointers. */
+// 一般的Redis对象都使用这个hash因子组合(就叫它dictType吧，总之包含了一系列的哈希设置)
 dictType objectKeyPointerValueDictType = {
     dictEncObjHash,            /* hash function */
     NULL,                      /* key dup */
@@ -601,6 +602,7 @@ dictType objectKeyPointerValueDictType = {
 };
 
 /* Set dictionary type. Keys are SDS strings, values are ot used. */
+// 用于Redis SET结构的哈希表初始化
 dictType setDictType = {
     dictSdsHash,               /* hash function */
     NULL,                      /* key dup */
@@ -611,6 +613,7 @@ dictType setDictType = {
 };
 
 /* Sorted sets hash (note: a skiplist is used in addition to the hash table) */
+// 用于Redis ZSET存储，ZSET可能使用跳表和哈希表
 dictType zsetDictType = {
     dictSdsHash,               /* hash function */
     NULL,                      /* key dup */
@@ -621,6 +624,7 @@ dictType zsetDictType = {
 };
 
 /* Db->dict, keys are sds strings, vals are Redis objects. */
+// 各个db存储元素也是使用哈希表
 dictType dbDictType = {
     dictSdsHash,                /* hash function */
     NULL,                       /* key dup */
@@ -631,6 +635,7 @@ dictType dbDictType = {
 };
 
 /* server.lua_scripts sha (as sds string) -> scripts (as robj) cache. */
+// lua脚本的 sha1 -> lua 的映射关系
 dictType shaScriptObjectDictType = {
     dictSdsCaseHash,            /* hash function */
     NULL,                       /* key dup */
@@ -641,6 +646,7 @@ dictType shaScriptObjectDictType = {
 };
 
 /* Db->expires */
+// 过期键
 dictType keyptrDictType = {
     dictSdsHash,                /* hash function */
     NULL,                       /* key dup */
@@ -651,6 +657,7 @@ dictType keyptrDictType = {
 };
 
 /* Command table. sds string -> command struct pointer. */
+// 用来存文件开头的一堆命令
 dictType commandTableDictType = {
     dictSdsCaseHash,            /* hash function */
     NULL,                       /* key dup */
@@ -661,6 +668,7 @@ dictType commandTableDictType = {
 };
 
 /* Hash type hash table (note that small hashes are represented with ziplists) */
+// 双重哈希表
 dictType hashDictType = {
     dictSdsHash,                /* hash function */
     NULL,                       /* key dup */
@@ -673,6 +681,7 @@ dictType hashDictType = {
 /* Keylist hash table type has unencoded redis objects as keys and
  * lists as values. It's used for blocking operations (BLPOP) and to
  * map swapped keys to a list of clients waiting for this keys to be loaded. */
+// 用于BLPOP阻塞用法的事件触发场景
 dictType keylistDictType = {
     dictObjHash,                /* hash function */
     NULL,                       /* key dup */
@@ -684,6 +693,7 @@ dictType keylistDictType = {
 
 /* Cluster nodes hash table, mapping nodes addresses 1.2.3.4:6379 to
  * clusterNode structures. */
+// 集群的节点
 dictType clusterNodesDictType = {
     dictSdsHash,                /* hash function */
     NULL,                       /* key dup */
@@ -705,9 +715,11 @@ dictType clusterNodesBlackListDictType = {
     NULL                        /* val destructor */
 };
 
+// TODO 这个英文注释不是上面粘贴下来的吗？？
 /* Cluster re-addition blacklist. This maps node IDs to the time
  * we can re-add this node. The goal is to avoid readding a removed
  * node for some time. */
+// 存储Redis各个模块化代码的映射
 dictType modulesDictType = {
     dictSdsCaseHash,            /* hash function */
     NULL,                       /* key dup */
@@ -730,6 +742,7 @@ dictType migrateCacheDictType = {
 /* Replication cached script dict (server.repl_scriptcache_dict).
  * Keys are sds SHA1 strings, while values are not used at all in the current
  * implementation. */
+// lua脚本缓存，知道哪些脚本已经发送给从节点了，已经可以直接执行
 dictType replScriptCacheDictType = {
     dictSdsCaseHash,            /* hash function */
     NULL,                       /* key dup */

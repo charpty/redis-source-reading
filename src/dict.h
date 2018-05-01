@@ -55,7 +55,7 @@ typedef struct dictEntry {
     struct dictEntry *next;
 } dictEntry;
 
-// 初始化哈希表时所需的各类函数指针集合
+// 初始化哈希表时所需的各类函数指针集合,相当于把各个设置项都封装在该结构体里
 typedef struct dictType {
     // 哈希Key的函数
     uint64_t (*hashFunction)(const void *key);
