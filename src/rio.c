@@ -4,10 +4,14 @@
  * abstraction can be used to read and write the RDB format using in-memory
  * buffers or files.
  *
+ * rio是Redis对于IO流操作的统一封装，它提供了一套用于简化各类数据结构操作的读写接口
+ *
  * A rio object provides the following methods:
  *  read: read from stream.
  *  write: write to stream.
  *  tell: get the current offset.
+ *
+ * 提供了读写接口以及获取当前偏移量的接口
  *
  * It is also possible to set a 'checksum' method that is used by rio.c in order
  * to compute a checksum of the data written or read, or to query the rio object
@@ -57,6 +61,8 @@
 
 /* ------------------------- Buffer I/O implementation ----------------------- */
 
+// 基于内存当IO操作只设计到sdscatlen、memcpy等标准API的简单操作
+// 目前看来主要是用于封装一层内存读写，为cluster操作提供一层抽象
 /* Returns 1 or 0 for success/failure. */
 static size_t rioBufferWrite(rio *r, const void *buf, size_t len) {
     r->io.buffer.ptr = sdscatlen(r->io.buffer.ptr,(char*)buf,len);
@@ -105,6 +111,8 @@ void rioInitWithBuffer(rio *r, sds s) {
 
 /* --------------------- Stdio file pointer implementation ------------------- */
 
+// 单个文件的操作，其实目前就是备份文件rbd、aof的操作
+// 是对系统提供的文件读写的API的封装
 /* Returns 1 or 0 for success/failure. */
 static size_t rioFileWrite(rio *r, const void *buf, size_t len) {
     size_t retval;
@@ -170,6 +178,7 @@ static size_t rioFdsetWrite(rio *r, const void *buf, size_t len) {
     ssize_t retval;
     int j;
     unsigned char *p = (unsigned char*) buf;
+    // 当buf为空时要写入并刷空
     int doflush = (buf == NULL && len == 0);
 
     /* To start we always append to our buffer. If it gets larger than
@@ -177,6 +186,7 @@ static size_t rioFdsetWrite(rio *r, const void *buf, size_t len) {
     if (len) {
         r->io.fdset.buf = sdscatlen(r->io.fdset.buf,buf,len);
         len = 0; /* Prevent entering the while below if we don't flush. */
+        // 达到flush阈值，也就是IO 缓存 buffer上限
         if (sdslen(r->io.fdset.buf) > PROTO_IOBUF_LEN) doflush = 1;
     }
 
@@ -188,6 +198,8 @@ static size_t rioFdsetWrite(rio *r, const void *buf, size_t len) {
     /* Write in little chunchs so that when there are big writes we
      * parallelize while the kernel is sending data in background to
      * the TCP socket. */
+    // 分段写入主要是考虑IO并行化提高效率，在write()返回后还没有将数据全部通过socket送出
+    // 利用等待送出的过程中进行其他fd的操作
     while(len) {
         size_t count = len < 1024 ? len : 1024;
         int broken = 0;
@@ -231,6 +243,7 @@ static size_t rioFdsetWrite(rio *r, const void *buf, size_t len) {
 }
 
 /* Returns 1 or 0 for success/failure. */
+// 向客户端同步信息是master主动发，不存在读取场景
 static size_t rioFdsetRead(rio *r, void *buf, size_t len) {
     UNUSED(r);
     UNUSED(buf);
@@ -245,12 +258,14 @@ static off_t rioFdsetTell(rio *r) {
 
 /* Flushes any buffer to target device if applicable. Returns 1 on success
  * and 0 on failures. */
+// 由于rioFdsetWrite()函数在buf为空时也实现了flush的逻辑，所以直接调用rioFdsetWrite()
 static int rioFdsetFlush(rio *r) {
     /* Our flush is implemented by the write method, that recognizes a
      * buffer set to NULL with a count of zero as a flush request. */
     return rioFdsetWrite(r,NULL,0);
 }
 
+// 多个Fd句柄的操作基本上就是多socket client的场景了,目前仅用于集群同步
 static const rio rioFdsetIO = {
     rioFdsetRead,
     rioFdsetWrite,
@@ -304,12 +319,17 @@ void rioSetAutoSync(rio *r, off_t bytes) {
     r->io.file.autosync = bytes;
 }
 
+// 在统一封装了3种IO的操作之后，就可以为IO操作提供一些统一的操作函数了, 首先是一些IO最基本的操作
+// 再则最重要的就是对Redis通信协议RESP的处理封装，这样调用者只要关心写数据信息即可，不必再关心组装格式了
+// 这也是使用rio封装这3个基本操作的关键目的
+
 /* --------------------------- Higher level interface --------------------------
  *
  * The following higher level functions use lower level rio.c functions to help
  * generating the Redis protocol for the Append Only File. */
 
 /* Write multi bulk count in the format: "*<count>\r\n". */
+// 几种格式的封装是rio统一3种IO操作后得到的非常大的好处
 size_t rioWriteBulkCount(rio *r, char prefix, long count) {
     char cbuf[128];
     int clen;
