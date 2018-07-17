@@ -589,6 +589,17 @@ int dictDelete(dict *ht, const void *key) {
  * entry = dictUnlink(dictionary,entry);
  * // Do something with entry
  * dictFreeUnlinkedEntry(entry); // <- This does not need to lookup again.
+ *
+ * 将指定key从字典中移除引用关系，但是不对key和value本身做释放操作
+ * 函数将返回被解除引用的相应entry以便调用者继续对该entry操作
+ * 这个函数主要用于在解除引用后还想继续使用entry，并自行在指定时间释放的场景,缓删除场景
+ *
+ * 参数列表
+ *      1. ht: 待操作的字典
+ *      2. key: 待移除的key
+ *
+ * 返回值
+ *      指定key对应的entry
  */
 dictEntry *dictUnlink(dict *ht, const void *key) {
     return dictGenericDelete(ht,key,1);

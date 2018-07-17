@@ -28,6 +28,11 @@ size_t lazyfreeGetPendingObjectsCount(void) {
  *
  * For lists the funciton returns the number of elements in the quicklist
  * representing the list. */
+/*
+ * 计算释放指定对象能够释放空间比例
+ * 每次去计算一个对象占的内存是比较困难的，特别是非线性内存情况下, 所以不总是返回真的内存空间占用
+ * 所以这里只是大致的得出一个对象所占内存，比如list，当它的节点多了，占的内存自然也多
+ */
 size_t lazyfreeGetFreeEffort(robj *obj) {
     if (obj->type == OBJ_LIST) {
         quicklist *ql = obj->ptr;
@@ -51,6 +56,10 @@ size_t lazyfreeGetFreeEffort(robj *obj) {
  * a lazy free list instead of being freed synchronously. The lazy free list
  * will be reclaimed in a different bio.c thread. */
 #define LAZYFREE_THRESHOLD 64
+/*
+ * 删除指定key，该方法会自动判断当前DB的情况，如果待清理任务不是特别忙的时候则会异步执行删除任务
+ * 也就是会另用一个线程来完成该任务，该线程已在redis启动时由bioInit()提前初始化好
+ */
 int dbAsyncDelete(redisDb *db, robj *key) {
     /* Deleting an entry from the expires dict will not free the sds of
      * the key, because it is shared with the main dictionary. */
@@ -59,6 +68,7 @@ int dbAsyncDelete(redisDb *db, robj *key) {
     /* If the value is composed of a few allocations, to free in a lazy way
      * is actually just slower... So under a certain limit we just free
      * the object synchronously. */
+    // 删除操作比较慢，先解除引用，这样其实当删除调用返回时，该key已经无法被访问了
     dictEntry *de = dictUnlink(db->dict,key->ptr);
     if (de) {
         robj *val = dictGetVal(de);
@@ -72,9 +82,13 @@ int dbAsyncDelete(redisDb *db, robj *key) {
          * objects, and then call dbDelete(). In this case we'll fall
          * through and reach the dictFreeUnlinkedEntry() call, that will be
          * equivalent to just calling decrRefCount(). */
+        // 当对象大到一定程度，那么就要选择懒释放了，单线程模型的redis来释放一个大对象会造成阻塞
         if (free_effort > LAZYFREE_THRESHOLD && val->refcount == 1) {
+            // 和juc的AtomicInteger原子变量系列类似的原子加1并返回
             atomicIncr(lazyfree_objects,1);
+            // 通过bio线程模型创建一个后台任务
             bioCreateBackgroundJob(BIO_LAZY_FREE,val,NULL,NULL);
+            // 如果选择了lazy free，那么就把value设置为NULL，防止被后面的dictFreeUnlinkedEntry()直接释放
             dictSetVal(db->dict,de,NULL);
         }
     }
@@ -82,6 +96,7 @@ int dbAsyncDelete(redisDb *db, robj *key) {
     /* Release the key-val pair, or just the key if we set the val
      * field to NULL in order to lazy free it later. */
     if (de) {
+        // key是直接free的
         dictFreeUnlinkedEntry(db->dict,de);
         if (server.cluster_enabled) slotToKeyDel(key);
         return 1;
@@ -93,6 +108,9 @@ int dbAsyncDelete(redisDb *db, robj *key) {
 /* Empty a Redis DB asynchronously. What the function does actually is to
  * create a new empty set of hash tables and scheduling the old ones for
  * lazy freeing. */
+/*
+ * 异步flush整个DB，即时创建一个新的dict，老的则通过后台任务慢慢删除
+ */
 void emptyDbAsync(redisDb *db) {
     dict *oldht1 = db->dict, *oldht2 = db->expires;
     db->dict = dictCreate(&dbDictType,NULL);
@@ -103,6 +121,7 @@ void emptyDbAsync(redisDb *db) {
 
 /* Empty the slots-keys map of Redis CLuster by creating a new empty one
  * and scheduiling the old for lazy freeing. */
+// 集群模式下emptyDb
 void slotToKeyFlushAsync(void) {
     rax *old = server.cluster->slots_to_keys;
 
@@ -115,6 +134,7 @@ void slotToKeyFlushAsync(void) {
 
 /* Release objects from the lazyfree thread. It's just decrRefCount()
  * updating the count of objects to release. */
+// 提供给bio调用的引用清理函数
 void lazyfreeFreeObjectFromBioThread(robj *o) {
     decrRefCount(o);
     atomicDecr(lazyfree_objects,1);
