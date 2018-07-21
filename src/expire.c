@@ -383,17 +383,29 @@ void flushSlaveKeysWithExpireList(void) {
  *
  * unit is either UNIT_SECONDS or UNIT_MILLISECONDS, and is only used for
  * the argv[2] parameter. The basetime is always specified in milliseconds. */
+/*
+ * EXPIRE、PEXPIRE等命令的通用实现
+ *
+ * 参数列表
+ *      1. c: 调用命令的client连接对应结构体
+ *      2. basetime: 基准时间，从哪开始，以毫秒为单位，为了统一相对时间指定和绝对时间指定两种方式
+ *      3. unit: 用于指定时间单位，毫秒或者秒
+ */
 void expireGenericCommand(client *c, long long basetime, int unit) {
+    // 按规定顺序读取参数，传参格式正确与否已校验过
     robj *key = c->argv[1], *param = c->argv[2];
     long long when; /* unix time in milliseconds when the key will expire. */
 
+    // 过期时间必须是个数字
     if (getLongLongFromObjectOrReply(c, param, &when, NULL) != C_OK)
         return;
 
     if (unit == UNIT_SECONDS) when *= 1000;
+    // 处理指定相对时间或绝对时间的情况
     when += basetime;
 
     /* No key, return zero. */
+    // 这个key已经不存在了，相当于是已经被过期了，所以也是成功了
     if (lookupKeyWrite(c->db,key) == NULL) {
         addReply(c,shared.czero);
         return;
@@ -406,8 +418,10 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
      * Instead we take the other branch of the IF statement setting an expire
      * (possibly in the past) and wait for an explicit DEL from the master. */
     if (when <= mstime() && !server.loading && !server.masterhost) {
+        // 该key已经过期的情况下则进行直接删除或lazyfree
         robj *aux;
 
+        // lazyfree的情况下只要做了字典的unlink则可以返回
         int deleted = server.lazyfree_lazy_expire ? dbAsyncDelete(c->db,key) :
                                                     dbSyncDelete(c->db,key);
         serverAssertWithInfo(c,key,deleted);
@@ -431,6 +445,9 @@ void expireGenericCommand(client *c, long long basetime, int unit) {
 }
 
 /* EXPIRE key seconds */
+/*
+ * EXPIRE命令实现入口，由server.c hard code加载
+ */
 void expireCommand(client *c) {
     expireGenericCommand(c,mstime(),UNIT_SECONDS);
 }
@@ -451,10 +468,12 @@ void pexpireatCommand(client *c) {
 }
 
 /* Implements TTL and PTTL */
+// 获取对象存活时间的通用逻辑，其实两种调用只是返回结果单位不同
 void ttlGenericCommand(client *c, int output_ms) {
     long long expire, ttl = -1;
 
     /* If the key does not exist at all, return -2 */
+    // 注意key不存在的情况下返回的是-2,存在但过期的情况下返回-1
     if (lookupKeyReadWithFlags(c->db,c->argv[1],LOOKUP_NOTOUCH) == NULL) {
         addReplyLongLong(c,-2);
         return;
@@ -467,18 +486,22 @@ void ttlGenericCommand(client *c, int output_ms) {
         if (ttl < 0) ttl = 0;
     }
     if (ttl == -1) {
+        // key存在但已过期
         addReplyLongLong(c,-1);
     } else {
+        // 返回实际的剩余时间
         addReplyLongLong(c,output_ms ? ttl : ((ttl+500)/1000));
     }
 }
 
 /* TTL key */
+// 获取对象剩余存活时间，单位秒
 void ttlCommand(client *c) {
     ttlGenericCommand(c, 0);
 }
 
 /* PTTL key */
+// 获取对象剩余存活时间，单位毫秒
 void pttlCommand(client *c) {
     ttlGenericCommand(c, 1);
 }
@@ -498,6 +521,7 @@ void persistCommand(client *c) {
 }
 
 /* TOUCH key1 [key2 key3 ... keyN] */
+// touch一个key，重新计算其ttl
 void touchCommand(client *c) {
     int touched = 0;
     for (int j = 1; j < c->argc; j++)
