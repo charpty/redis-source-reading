@@ -44,9 +44,24 @@
 #include "sha1.h"
 
 /* Glob-style pattern matching. */
+/*
+ * 判断某个字符串能否和指定表达式匹配
+ *
+ * 参数列表
+ *      1. patttern: 表达式字符串
+ *      2. patternLen: 表达式字符串的长度
+ *      3. string: 待匹配的字符串
+ *      4. stringlen: 待匹配的字符串的长度
+ *      5. nocase: 匹配时是否忽略大小写
+ *
+ * 返回值
+ *      0代表不匹配，1代表匹配
+ */
 int stringmatchlen(const char *pattern, int patternLen,
         const char *string, int stringLen, int nocase)
 {
+    // 大环境没有上下文变量，第一个字符决定了匹配方式
+    // TODO 这几个有点绕，明天再看～
     while(patternLen) {
         switch(pattern[0]) {
         case '*':
@@ -54,6 +69,7 @@ int stringmatchlen(const char *pattern, int patternLen,
                 pattern++;
                 patternLen--;
             }
+            // pattern[0]还是'*'，任意匹配肯定满足了
             if (patternLen == 1)
                 return 1; /* match */
             while(stringLen) {
@@ -177,6 +193,17 @@ int stringmatch(const char *pattern, const char *string, int nocase) {
  * On parsing error, if *err is not NULL, it's set to 1, otherwise it's
  * set to 0. On error the function return value is 0, regardless of the
  * fact 'err' is NULL or not. */
+/*
+ * 将human可读的内存表示法转换为数字形式，如将"1MB"转换为1048576(1024*1024)
+ *
+ * 参数列表
+ *      1. p: 待转换的内存大小字符串，如"1Gb"、"5kb"等
+ *      2. err: 出参，转换是否出错，该值非空且转换出错时被设置为1
+ *
+ * 返回值
+ *      正常情况下返回p所表示内存大小的对应数字，错误时返回0
+ *
+ */
 long long memtoll(const char *p, int *err) {
     const char *u;
     char buf[128];
@@ -188,8 +215,10 @@ long long memtoll(const char *p, int *err) {
 
     /* Search the first non digit character. */
     u = p;
+    // 找到第一个不是数字的字符，就认为它是内存大小的单位了。当然得排除负号(有必要吗？)
     if (*u == '-') u++;
     while(*u && isdigit(*u)) u++;
+    // 忽略大小的匹配
     if (*u == '\0' || !strcasecmp(u,"b")) {
         mul = 1;
     } else if (!strcasecmp(u,"k")) {
@@ -211,6 +240,7 @@ long long memtoll(const char *p, int *err) {
 
     /* Copy the digits into a buffer, we'll use strtoll() to convert
      * the digit (without the unit) into a number. */
+    // 存放结果的buf要足够大,把p的数字部分拷贝到buf中
     digits = u-p;
     if (digits >= sizeof(buf)) {
         if (err) *err = 1;
@@ -222,15 +252,21 @@ long long memtoll(const char *p, int *err) {
     char *endptr;
     errno = 0;
     val = strtoll(buf,&endptr,10);
+    // 转换后不能为0，因为这个函数约定了0代表错误，调用者不应传入"0b"这样的，也没有意义
+    // 虽然前面判断了第一个不是数字的，这里也要防止数字过长不能转换全部等问题，所以要判断是否全部转换
     if ((val == 0 && errno == EINVAL) || *endptr != '\0') {
         if (err) *err = 1;
         return 0;
     }
+    // 返回以b为单位的内存大小数字
     return val*mul;
 }
 
 /* Return the number of digits of 'v' when converted to string in radix 10.
  * See ll2string() for more information. */
+/*
+ * 判断一个10进制无符号数字有多少位
+ */
 uint32_t digits10(uint64_t v) {
     if (v < 10) return 1;
     if (v < 100) return 2;
@@ -505,6 +541,15 @@ int string2ld(const char *s, size_t slen, long double *dp) {
  * This function does not support human-friendly formatting like ld2string
  * does. It is intented mainly to be used inside t_zset.c when writing scores
  * into a ziplist representing a sorted set. */
+/*
+ * 将double类型转换为字符串
+ *
+ *
+ * 参数列表
+ *      1. buf: 出参，结果字符串
+ *      2. len: 出参buf的长度
+ *      3. value: 待转换的数字
+ */
 int d2string(char *buf, size_t len, double value) {
     if (isnan(value)) {
         len = snprintf(buf,len,"nan");
@@ -549,6 +594,15 @@ int d2string(char *buf, size_t len, double value) {
  *
  * The function returns the length of the string or zero if there was not
  * enough buffer room to store it. */
+/*
+ * 将long double数字转换为字符串
+ *
+ * 参数列表
+ *      1. buf: 出参，转换后的字符串结果
+ *      2. len: 出参buf的长度
+ *      3. value: 待转换的数字
+ *      4. humanfriendly: 是否human可读化
+ */
 int ld2string(char *buf, size_t len, long double value, int humanfriendly) {
     size_t l;
 
@@ -691,20 +745,33 @@ void getRandomHexChars(char *p, unsigned int len) {
  * The function does not try to normalize everything, but only the obvious
  * case of one or more "../" appearning at the start of "filename"
  * relative path. */
+/*
+ * 获取一个指定文件的绝对路径
+ *
+ * 参数列表
+ *      1. filename: 文件的相对路径，也可以是绝对路径，那就不用查了直接返回即可
+ *
+ * 返回值
+ *      对应的绝对路径，以sds形式表示，错误时则返回空
+ */
 sds getAbsolutePath(char *filename) {
     char cwd[1024];
     sds abspath;
     sds relpath = sdsnew(filename);
 
+    // 去除文件名的干扰字符
     relpath = sdstrim(relpath," \r\n\t");
+    // linux中以'/'开头的路径都是绝对路径
     if (relpath[0] == '/') return relpath; /* Path is already absolute. */
 
     /* If path is relative, join cwd and relative path. */
+    // 调用系统函数获取当前目录路径
     if (getcwd(cwd,sizeof(cwd)) == NULL) {
         sdsfree(relpath);
         return NULL;
     }
     abspath = sdsnew(cwd);
+    // 拼接'/'
     if (sdslen(abspath) && abspath[sdslen(abspath)-1] != '/')
         abspath = sdscat(abspath,"/");
 
@@ -714,18 +781,23 @@ sds getAbsolutePath(char *filename) {
      *
      * For every "../" we find in the filename, we remove it and also remove
      * the last element of the cwd, unless the current cwd is "/". */
+    // 当相对路径里是"../"这种相对目录写法时则要将其优化移除，目前已知其上层目录，移除并路径向上提一层即可
     while (sdslen(relpath) >= 3 &&
            relpath[0] == '.' && relpath[1] == '.' && relpath[2] == '/')
     {
+        // 截掉"../"之后，把已得到的目录路径abspath向上提一层
         sdsrange(relpath,3,-1);
         if (sdslen(abspath) > 1) {
+            // 从倒数第二个字符开始找，末尾肯定是'/'的
             char *p = abspath + sdslen(abspath)-2;
             int trimlen = 1;
 
+            // 遍历找到倒数第二个'/'，由于abspath.len>1,所以至少有两个'/'，不用担心碰到根
             while(*p != '/') {
                 p--;
                 trimlen++;
             }
+            // 移除倒数第二个'/'以后字符
             sdsrange(abspath,0,-(trimlen+1));
         }
     }
@@ -740,7 +812,12 @@ sds getAbsolutePath(char *filename) {
  * relative or absolute path. This function just checks that no / or \
  * character exists inside the specified path, that's enough in the
  * environments where Redis runs. */
+/*
+ * 判断一个path是不是就是一个简单的文件名，不含任何路径信息
+ * 和basename命令类似，但是是个简化版本的,没有对于后缀'.'、本身带'/'等情况等处理
+ */
 int pathIsBaseName(char *path) {
+    // 这里只判断没有'/'或'\'则认为是单纯的文件名，限定在redis环境中是足够了
     return strchr(path,'/') == NULL && strchr(path,'\\') == NULL;
 }
 
