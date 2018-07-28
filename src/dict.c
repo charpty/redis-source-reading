@@ -86,6 +86,7 @@ static int _dictInit(dict *ht, dictType *type, void *privDataPtr);
 
 static uint8_t dict_hash_function_seed[16];
 
+// 由server.c设置hash初始种子
 void dictSetHashFunctionSeed(uint8_t *seed) {
     memcpy(dict_hash_function_seed,seed,sizeof(dict_hash_function_seed));
 }
@@ -100,6 +101,7 @@ uint8_t *dictGetHashFunctionSeed(void) {
 /* The default hashing function uses SipHash implementation
  * in siphash.c. */
 
+// siphash更注重的是hash安全性，防止hash碰撞导致的字典行为退化为链表
 uint64_t siphash(const uint8_t *in, const size_t inlen, const uint8_t *k);
 uint64_t siphash_nocase(const uint8_t *in, const size_t inlen, const uint8_t *k);
 
@@ -115,6 +117,7 @@ uint64_t dictGenCaseHashFunction(const unsigned char *buf, int len) {
 
 /* Reset a hash table already initialized with ht_init().
  * NOTE: This function should only be called by ht_destroy(). */
+// 字典析构时调用的重置函数
 static void _dictReset(dictht *ht)
 {
     ht->table = NULL;
@@ -169,11 +172,15 @@ int _dictInit(dict *d, dictType *type,
 
 /* Resize the table to the minimal size that contains all the elements,
  * but with the invariant of a USED/BUCKETS ratio near to <= 1 */
+// resize字典到最小化大小，恰好到够容纳所有元素
+// 最好是一个元素对应一个bucket，这样方便通过hash快速定位
 int dictResize(dict *d)
 {
     int minimal;
 
+    // 首先要查看当前字典状态
     if (!dict_can_resize || dictIsRehashing(d)) return DICT_ERR;
+    // resize大小刚好是目前存在元素大小, 如果小于初始化大小那就不折腾大小了
     minimal = d->ht[0].used;
     if (minimal < DICT_HT_INITIAL_SIZE)
         minimal = DICT_HT_INITIAL_SIZE;
@@ -299,6 +306,7 @@ int dictRehash(dict *d, int n) {
     return 1;
 }
 
+// 获取当前时间，以毫秒形式展示
 long long timeInMilliseconds(void) {
     struct timeval tv;
 
@@ -307,6 +315,16 @@ long long timeInMilliseconds(void) {
 }
 
 /* Rehash for an amount of time between ms milliseconds and ms+1 milliseconds */
+/*
+ * rehash字典一段时间
+ *
+ * 参数列表
+ *      1. d: 待处理的字典
+ *      2. ms: 要rehash的时间
+ *
+ * 返回值
+ *      在这个时间内成功rehash的bucket数量
+ */
 int dictRehashMilliseconds(dict *d, int ms) {
     long long start = timeInMilliseconds();
     int rehashes = 0;
@@ -607,6 +625,7 @@ dictEntry *dictUnlink(dict *ht, const void *key) {
 
 /* You need to call this function to really free the entry after a call
  * to dictUnlink(). It's safe to call this function with 'he' = NULL. */
+// 因为存在unlink entry的引用的情况，所以需要释放被unlink的entry
 void dictFreeUnlinkedEntry(dict *d, dictEntry *he) {
     if (he == NULL) return;
     dictFreeKey(d, he);
@@ -655,6 +674,7 @@ int _dictClear(dict *d, dictht *ht, void(callback)(void *)) {
 }
 
 /* Clear & Release the hash table */
+// 直接clear整个字典
 void dictRelease(dict *d)
 {
     _dictClear(d,&d->ht[0],NULL);
@@ -722,6 +742,18 @@ void *dictFetchValue(dict *d, const void *key) {
  * the fingerprint again when the iterator is released.
  * If the two fingerprints are different it means that the user of the iterator
  * performed forbidden operations against the dictionary while iterating. */
+/*
+ * 获取当前字典的指纹，其实也是此时此刻字典的状态摘要的一个64位字符串，作为此刻字典状态的唯一标示
+ * 之所以需要指纹，主要是校验字典是否被修改过
+ * 在有线程获取到迭代器时会获取此刻的字典指纹，迭代器释放时又再获取一次，检验字典是否被修改过
+ * 64位指纹其实就是字典里几个属性值异或的结果
+ *
+ * 参数列表
+ *      1. d: 待获取指纹的字典
+ *
+ * 返回值
+ *      此刻字典状态的唯一标示
+ */
 long long dictFingerprint(dict *d) {
     long long integers[6], hash = 0;
     int j;
@@ -754,6 +786,7 @@ long long dictFingerprint(dict *d) {
     return hash;
 }
 
+// 获取当前字典的迭代器
 dictIterator *dictGetIterator(dict *d)
 {
     dictIterator *iter = zmalloc(sizeof(*iter));
