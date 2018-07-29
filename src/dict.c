@@ -786,7 +786,7 @@ long long dictFingerprint(dict *d) {
     return hash;
 }
 
-// 获取当前字典的迭代器
+// 获取当前字典的迭代器, 仅允许读元素
 dictIterator *dictGetIterator(dict *d)
 {
     dictIterator *iter = zmalloc(sizeof(*iter));
@@ -800,6 +800,7 @@ dictIterator *dictGetIterator(dict *d)
     return iter;
 }
 
+// 安全的迭代器，可以修改字典中的元素，仅是一个标志位的区别
 dictIterator *dictGetSafeIterator(dict *d) {
     dictIterator *i = dictGetIterator(d);
 
@@ -807,19 +808,34 @@ dictIterator *dictGetSafeIterator(dict *d) {
     return i;
 }
 
+/*
+ * 获取迭代器的下一个元素
+ * 获取的迭代器其实仅仅是一个属性存储器，通过dict提供的dictNext函数来遍历
+ *
+ * 参数列表
+ *      1. iter: 迭代器，存储了迭代元素需要的各个属性值
+ *
+ * 返回值
+ *      下一个entry
+ */
 dictEntry *dictNext(dictIterator *iter)
 {
     while (1) {
+        // 当前entry为空，要么是刚开始，要么是跳到下一个bucket
         if (iter->entry == NULL) {
             dictht *ht = &iter->d->ht[iter->table];
+            // 是主表且刚开始进行遍历时要处理是否为安全模式的逻辑
             if (iter->index == -1 && iter->table == 0) {
+                // unsafe模式下要计算出此刻字典的状态指纹，便于迭代器释放时校验
                 if (iter->safe)
                     iter->d->iterators++;
                 else
                     iter->fingerprint = dictFingerprint(iter->d);
             }
             iter->index++;
+            // 如果遍历到当前ht的末尾了，看看是否还需要遍历另外一个ht
             if (iter->index >= (long) ht->size) {
+                // 如果字典正处于rehash状态则需要遍历另外一个ht
                 if (dictIsRehashing(iter->d) && iter->table == 0) {
                     iter->table++;
                     iter->index = 0;
@@ -830,11 +846,13 @@ dictEntry *dictNext(dictIterator *iter)
             }
             iter->entry = ht->table[iter->index];
         } else {
+            // 直接找到entry的下一个，为空时则会遍历其他桶
             iter->entry = iter->nextEntry;
         }
         if (iter->entry) {
             /* We need to save the 'next' here, the iterator user
              * may delete the entry we are returning. */
+            // 返回前先设置好nextEntry，这样即时调用者删除了当前entry，迭代器仍可正常工作
             iter->nextEntry = iter->entry->next;
             return iter->entry;
         }
@@ -842,8 +860,10 @@ dictEntry *dictNext(dictIterator *iter)
     return NULL;
 }
 
+// 释放字典迭代器
 void dictReleaseIterator(dictIterator *iter)
 {
+    // 处理安全模式逻辑，在非安全模式下，最终要校验迭代器创建与释放前后字典的状态指纹是否一致
     if (!(iter->index == -1 && iter->table == 0)) {
         if (iter->safe)
             iter->d->iterators--;
@@ -855,6 +875,15 @@ void dictReleaseIterator(dictIterator *iter)
 
 /* Return a random entry from the hash table. Useful to
  * implement randomized algorithms */
+/*
+ * 随机获取字典中的一个元素
+ *
+ * 参数列表
+ *      1. d: 字典
+ *
+ * 返回值
+ *      随机的一个元素（其entry）
+ */
 dictEntry *dictGetRandomKey(dict *d)
 {
     dictEntry *he, *orighe;
