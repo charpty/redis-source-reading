@@ -877,6 +877,7 @@ void dictReleaseIterator(dictIterator *iter)
  * implement randomized algorithms */
 /*
  * 随机获取字典中的一个元素
+ * redis在元素过期、内存清理等方面用到了很多随机性逻辑
  *
  * 参数列表
  *      1. d: 字典
@@ -947,13 +948,29 @@ dictEntry *dictGetRandomKey(dict *d)
  * of continuous elements to run some kind of algorithm or to produce
  * statistics. However the function is much faster than dictGetRandomKey()
  * at producing N elements. */
+/*
+ * 随机获取字典中的几个元素
+ * redis在元素过期、内存释放时不想全部扫描，从而使用随机方式处理被选中的一部分元素
+ * 这个函数比dictGetRandomKey要快
+ *
+ * 参数列表
+ *      1. d: 字典引用
+ *      2. des: 出参，大小必须能装下要求的元素个数
+ *      3. count: 一共要取几个元素，结果元素个数根据字典状态和随机数而定，不一定是要求的个数
+ *
+ * 返回值
+ *      实际取到的元素的个数
+ */
 unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
     unsigned long j; /* internal hash table id, 0 or 1. */
     unsigned long tables; /* 1 or 2 tables? */
     unsigned long stored = 0, maxsizemask;
     unsigned long maxsteps;
 
+    // 字典里所有元素也不及count
     if (dictSize(d) < count) count = dictSize(d);
+    // 这里其实约定了循环次数，如果达到这个计算次数还没有得出结果那就算了
+    // 由于redis的单线程模型，所以很多地方会使用这种可预计的计算方式
     maxsteps = count*10;
 
     /* Try to do a rehashing work proportional to 'count'. */
@@ -972,6 +989,7 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
     /* Pick a random point inside the larger table. */
     unsigned long i = random() & maxsizemask;
     unsigned long emptylen = 0; /* Continuous empty entries so far. */
+    // 已取到指定个数元素或者已达最大计算步数
     while(stored < count && maxsteps--) {
         for (j = 0; j < tables; j++) {
             /* Invariant of the dict.c rehashing: up to the indexes already
@@ -1031,7 +1049,9 @@ static unsigned long rev(unsigned long v) {
 
 /* dictScan() is used to iterate over the elements of a dictionary.
  *
- * dictScan用于迭代字典中的元素
+ * dictScan用于迭代字典中的元素, 这也是各种*scan的主实现逻辑
+ *
+ *
  *
  * Iterating works the following way:
  *
@@ -1065,6 +1085,17 @@ static unsigned long rev(unsigned long v) {
  * bits. That is, instead of incrementing the cursor normally, the bits
  * of the cursor are reversed, then the cursor is incremented, and finally
  * the bits are reversed again.
+ *
+ * 这种迭代的算法是Pieter Noordhuis设计的。
+ * 大概就是一种二进制位迭代的方式D#--，其讨论：https://github.com/antirez/redis/pull/579
+ *
+ * scan迭代主要要满足以下几种情况下依然能返回正确结果
+ * 1、字典在迭代过程中无任何变化
+ * 2、字典在迭代过程中出现缩容或者扩容的情况
+ * 3、字典在迭代过程中出现rehash情况
+ *
+ * 所以和普通的顺序遍历迭代不同，scan迭代还是比较复杂的
+ * 但是scan也有比普通迭代宽松的地方，scan可以重复的返回元素，只要保证每个元素都迭代到即可
  *
  * This strategy is needed because the hash table may be resized between
  * iteration calls.
@@ -1115,6 +1146,7 @@ static unsigned long rev(unsigned long v) {
  * This iterator is completely stateless, and this is a huge advantage,
  * including no additional memory used.
  *
+ * 这个算法有几个限制
  * The disadvantages resulting from this design are:
  *
  * 1) It is possible we return elements more than once. However this is usually
@@ -1124,6 +1156,10 @@ static unsigned long rev(unsigned long v) {
  *    we are sure we don't miss keys moving during rehashing.
  * 3) The reverse cursor is somewhat hard to understand at first, but this
  *    comment is supposed to help.
+ *
+ * 1) 相同元素可能被多次返回给客户端，在应用级别来处理重复元素即可
+ * 2) 迭代器每次迭代一个bucket的时候都要全量返回其中的所有元素，反正在rehash过程中错失元素
+ * 3) 这个算法比较难理解，但是看了这个注释会有很大的帮助D:#-#
  */
 unsigned long dictScan(dict *d,
                        unsigned long v,
@@ -1183,8 +1219,7 @@ unsigned long dictScan(dict *d,
             while (de) {
                 next = de->next;
                 fn(privdata, de);
-                de = next;
-            }
+                de = next; }
 
             /* Increment bits not covered by the smaller mask */
             v = (((v | m0) + 1) & ~m0) | (v & m0);
@@ -1310,6 +1345,7 @@ static long _dictKeyIndex(dict *d, const void *key, uint64_t hash, dictEntry **e
     return idx;
 }
 
+// 情况字典里所有元素
 void dictEmpty(dict *d, void(callback)(void*)) {
     _dictClear(d,&d->ht[0],callback);
     _dictClear(d,&d->ht[1],callback);
