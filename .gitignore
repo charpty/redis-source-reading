@@ -6,6 +6,7 @@
 *.log
 src/cscope.out
 src/tags
+tags
 dump.rdb
 redis-benchmark
 redis-check-aof
