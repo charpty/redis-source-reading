@@ -55,16 +55,21 @@ int clientSubscriptionsCount(client *c) {
 
 /* Subscribe a client to a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was already subscribed to that channel. */
+/*
+ * 订阅指定频道
+ */
 int pubsubSubscribeChannel(client *c, robj *channel) {
     dictEntry *de;
     list *clients = NULL;
     int retval = 0;
 
     /* Add the channel to the client -> channels hash table */
+    // 在client中也存放信息便于处理重复订阅和统计信息
     if (dictAdd(c->pubsub_channels,channel,NULL) == DICT_OK) {
         retval = 1;
         incrRefCount(channel);
         /* Add the client to the channel -> list of clients hash table */
+        // 订阅的实现主要依靠在server.pubsub_channels中存储了client订阅信息
         de = dictFind(server.pubsub_channels,channel);
         if (de == NULL) {
             clients = listCreate();
@@ -73,6 +78,7 @@ int pubsubSubscribeChannel(client *c, robj *channel) {
         } else {
             clients = dictGetVal(de);
         }
+        // clients已经存放住pubsub_channels哈希表中,将该client加入其中即可
         listAddNodeTail(clients,c);
     }
     /* Notify the client */
@@ -85,6 +91,9 @@ int pubsubSubscribeChannel(client *c, robj *channel) {
 
 /* Unsubscribe a client from a channel. Returns 1 if the operation succeeded, or
  * 0 if the client was not subscribed to the specified channel. */
+/*
+ * 取消订阅
+ */
 int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
     dictEntry *de;
     list *clients;
@@ -97,6 +106,7 @@ int pubsubUnsubscribeChannel(client *c, robj *channel, int notify) {
     if (dictDelete(c->pubsub_channels,channel) == DICT_OK) {
         retval = 1;
         /* Remove the client from the channel -> clients list hash table */
+        // 找到指定channel的客户端list并删除该client
         de = dictFind(server.pubsub_channels,channel);
         serverAssertWithInfo(c,NULL,de != NULL);
         clients = dictGetVal(de);
@@ -222,6 +232,9 @@ int pubsubUnsubscribeAllPatterns(client *c, int notify) {
 }
 
 /* Publish a message */
+/*
+ * 发布消息到指定频道
+ */
 int pubsubPublishMessage(robj *channel, robj *message) {
     int receivers = 0;
     dictEntry *de;
@@ -229,6 +242,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
     listIter li;
 
     /* Send to clients listening for that channel */
+    // 先找精确channel
     de = dictFind(server.pubsub_channels,channel);
     if (de) {
         list *list = dictGetVal(de);
@@ -236,6 +250,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         listIter li;
 
         listRewind(list,&li);
+        // 遍历在server.pubsub_channels里的client发送消息
         while ((ln = listNext(&li)) != NULL) {
             client *c = ln->value;
 
@@ -247,6 +262,7 @@ int pubsubPublishMessage(robj *channel, robj *message) {
         }
     }
     /* Send to clients listening to matching channels */
+    // 处理模式匹配方式订阅的客户端
     if (listLength(server.pubsub_patterns)) {
         listRewind(server.pubsub_patterns,&li);
         channel = getDecodedObject(channel);
@@ -315,6 +331,7 @@ void punsubscribeCommand(client *c) {
 }
 
 void publishCommand(client *c) {
+    // 返回一共通知到多少个客户端
     int receivers = pubsubPublishMessage(c->argv[1],c->argv[2]);
     if (server.cluster_enabled)
         clusterPropagatePublish(c->argv[1],c->argv[2]);
@@ -324,6 +341,14 @@ void publishCommand(client *c) {
 }
 
 /* PUBSUB command for Pub/Sub introspection. */
+/*
+ * PUBSUB命令实现,分为几个3个子命令
+ *
+ * channels: 列出当前有哪些有听众的频道
+ * numsub: 列出各频道以及它订阅的客户端数量
+ * numpat: 列出各频道以模式匹配方式订阅的客户端数量
+ *
+ */
 void pubsubCommand(client *c) {
     if (!strcasecmp(c->argv[1]->ptr,"channels") &&
         (c->argc == 2 || c->argc ==3))
@@ -336,10 +361,12 @@ void pubsubCommand(client *c) {
         void *replylen;
 
         replylen = addDeferredMultiBulkLength(c);
+        // 遍历server.pubsub_channels列出所有频道的各个客户端
         while((de = dictNext(di)) != NULL) {
             robj *cobj = dictGetKey(de);
             sds channel = cobj->ptr;
 
+            // 正确匹配或者模式匹配情况下能匹配上
             if (!pat || stringmatchlen(pat, sdslen(pat),
                                        channel, sdslen(channel),0))
             {
@@ -354,6 +381,7 @@ void pubsubCommand(client *c) {
         int j;
 
         addReplyMultiBulkLen(c,(c->argc-2)*2);
+        // 照着指定的channle一个个找出它们的听众数量
         for (j = 2; j < c->argc; j++) {
             list *l = dictFetchValue(server.pubsub_channels,c->argv[j]);
 
@@ -362,6 +390,7 @@ void pubsubCommand(client *c) {
         }
     } else if (!strcasecmp(c->argv[1]->ptr,"numpat") && c->argc == 2) {
         /* PUBSUB NUMPAT */
+        // 模式匹配的数据单独存储
         addReplyLongLong(c,listLength(server.pubsub_patterns));
     } else {
         addReplyErrorFormat(c,
