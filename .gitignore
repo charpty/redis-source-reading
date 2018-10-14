@@ -5,6 +5,7 @@
 *.o
 *.log
 src/cscope.out
+src/dict
 src/tags
 tags
 dump.rdb
