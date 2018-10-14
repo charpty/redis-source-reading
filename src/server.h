@@ -762,19 +762,35 @@ struct sharedObjectsStruct {
 };
 
 /* ZSETs use a specialized version of Skiplists */
+/*
+ * 跳表的具体节点
+ */
 typedef struct zskiplistNode {
+    // 实际元素数据对应字符串，在存入跳表前会被编码为字符串
+    // Redis还会将此ele作为key,分数存储在字典中方便统计
     sds ele;
+    // 排序依据, 允许多个同分数不同元素存在
     double score;
+    // 后节点指针，Redis的跳表第一层是一个双向链表
     struct zskiplistNode *backward;
+    // 表示一个节点共有多少层, 是一个柔性数组，需要在创建节点时根据层高具体分配
     struct zskiplistLevel {
+        // 前节点指针
         struct zskiplistNode *forward;
+        // 该层一次元素跳跃一共跳过多少个第一层元素, 用于统计排名
         unsigned int span;
     } level[];
 } zskiplistNode;
 
+/*
+ * Redis使用的跳表, 是有序集合zset的底层实现
+ */
 typedef struct zskiplist {
+    // 头尾节点
     struct zskiplistNode *header, *tail;
+    // 跳表共有元素个数
     unsigned long length;
+    // 跳表目前最高的层数
     int level;
 } zskiplist;
 
