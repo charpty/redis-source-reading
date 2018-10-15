@@ -129,54 +129,88 @@ int zslRandomLevel(void) {
 /* Insert a new node in the skiplist. Assumes the element does not already
  * exist (up to the caller to enforce that). The skiplist takes ownership
  * of the passed SDS string 'ele'. */
+/*
+ * 将元素插入到跳表中
+ *
+ * 参数列表
+ *      1. zsl: 跳表结构体
+ *      2. score: 插入元素的分数
+ *      3. ele: 插入元素的实际数据
+ *
+ * 返回值
+ *      插入元素的对应节点
+ */
 zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
+    // 和标准跳表一样使用update数组记录每层待插入位置所在前一个元素
     zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;
+    // 记录前置节点与第一个节点之间的跨度,即元素在列表中的排名-1
+    // 跨度指的都是跨过第0层多少个元素
     unsigned int rank[ZSKIPLIST_MAXLEVEL];
     int i, level;
 
     serverAssert(!isnan(score));
     x = zsl->header;
+    // 从最高层开始遍历, 从粗到细，找到每一层待插入的位置
     for (i = zsl->level-1; i >= 0; i--) {
         /* store rank that is crossed to reach the insert position */
         rank[i] = i == (zsl->level-1) ? 0 : rank[i+1];
+        // 直到找到第一个分数比该元素大的位置
+        // 或者分数与该元素相同但数据字符串比该元素大的位置
         while (x->level[i].forward &&
                 (x->level[i].forward->score < score ||
                     (x->level[i].forward->score == score &&
                     sdscmp(x->level[i].forward->ele,ele) < 0)))
         {
+            // 将已走过元素跨越元素进行计数，得出元素在列表中的排名
+            // 也可以认为已搜寻的路径长度
             rank[i] += x->level[i].span;
             x = x->level[i].forward;
         }
+        // 记录待插入位置
         update[i] = x;
     }
     /* we assume the element is not already inside, since we allow duplicated
      * scores, reinserting the same element should never happen since the
      * caller of zslInsert() should test in the hash table if the element is
      * already inside or not. */
+    // 随机产生一个层数，在1与MAXLEVEL之间，层数越高生成概率越低
     level = zslRandomLevel();
     if (level > zsl->level) {
+        // 如果产生的层数大于现有最高层数，则超出层数都需要初始化
         for (i = zsl->level; i < level; i++) {
             rank[i] = 0;
+            // 该元素作为这些层的第一个节点，前节点就是header
             update[i] = zsl->header;
+            // 初始化后这些层每层共两个元素, 走一步就是跨越所有元素
             update[i]->level[i].span = zsl->length;
         }
         zsl->level = level;
     }
+    // 创建节点，根据层高分配柔性数组内存
     x = zslCreateNode(level,score,ele);
     for (i = 0; i < level; i++) {
+        // 将新节点插入到各层链表中
         x->level[i].forward = update[i]->level[i].forward;
         update[i]->level[i].forward = x;
 
         /* update span covered by update[i] as x is inserted here */
+        // rank[0]是第0层的前置节点P1（也就是底层插入节点前面那个节点）与第一个节点的跨度
+        // rank[i]是第i层的前置节点P2（这一层里在插入节点前面那个节点）与第一个节点的跨度
+        // 插入节点X与后置节点Y的跨度f(X,Y)可由以下公式计算
+        // 关键在于f(P1,0)-f(P2,0)+1等于新节点与P2的跨度，这是因为跨度呈梯子形向下延伸到最底层
+        // 记录节点各层跨越元素情况span, 由层与层之间的跨越元素总和rank相减而得
         x->level[i].span = update[i]->level[i].span - (rank[0] - rank[i]);
+        // 插入位置前一个节点的span在原基础上加1即可(新节点在rank[0]的后一个位置)
         update[i]->level[i].span = (rank[0] - rank[i]) + 1;
     }
 
     /* increment span for untouched levels */
+    // header是个起始
     for (i = level; i < zsl->level; i++) {
         update[i]->level[i].span++;
     }
 
+    // 第0层是双向链表, 便于redis支持逆序类查找
     x->backward = (update[0] == zsl->header) ? NULL : update[0];
     if (x->level[0].forward)
         x->level[0].forward->backward = x;
