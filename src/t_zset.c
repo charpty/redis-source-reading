@@ -210,7 +210,7 @@ zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) {
         update[i]->level[i].span++;
     }
 
-    // 第0层是双向链表, 便于redis支持逆序类查找
+    // 第0层是双向链表, 便于redis常支持逆序类查找
     x->backward = (update[0] == zsl->header) ? NULL : update[0];
     if (x->level[0].forward)
         x->level[0].forward->backward = x;
@@ -476,12 +476,16 @@ unsigned long zslGetRank(zskiplist *zsl, double score, sds ele) {
 }
 
 /* Finds an element by its rank. The rank argument needs to be 1-based. */
+/*
+ * 找到排名为rank的元素
+ */
 zskiplistNode* zslGetElementByRank(zskiplist *zsl, unsigned long rank) {
     zskiplistNode *x;
     unsigned long traversed = 0;
     int i;
 
     x = zsl->header;
+    // 找元素的过程其实就是统计跨度span的过程，找到与第0个节点跨度为rank的节点
     for (i = zsl->level-1; i >= 0; i--) {
         while (x->level[i].forward && (traversed + x->level[i].span) <= rank)
         {
@@ -1233,13 +1237,18 @@ void zsetConvertToZiplistIfNeeded(robj *zobj, size_t maxelelen) {
  * storing it into *score. If the element does not exist C_ERR is returned
  * otherwise C_OK is returned and *score is correctly populated.
  * If 'zobj' or 'member' is NULL, C_ERR is returned. */
+/*
+ * 获取指定元素的分数
+ */
 int zsetScore(robj *zobj, sds member, double *score) {
     if (!zobj || !member) return C_ERR;
 
+    // ziplist模式下直接找到该元素并设置分数结果
     if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
         if (zzlFind(zobj->ptr, member, score) == NULL) return C_ERR;
     } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
         zset *zs = zobj->ptr;
+        // 根据元素数据ele直接找到分数
         dictEntry *de = dictFind(zs->dict, member);
         if (de == NULL) return C_ERR;
         *score = *(double*)dictGetVal(de);
@@ -2391,10 +2400,15 @@ void zinterstoreCommand(client *c) {
     zunionInterGenericCommand(c,c->argv[1], SET_OP_INTER);
 }
 
+/*
+ * 获取指定范围的元素
+ */
 void zrangeGenericCommand(client *c, int reverse) {
     robj *key = c->argv[1];
     robj *zobj;
+    // 是否同时展示元素的分数
     int withscores = 0;
+    // 从哪个位置到哪个位置，尾可以负数表示倒数第几个
     long start;
     long end;
     int llen;
@@ -2403,6 +2417,7 @@ void zrangeGenericCommand(client *c, int reverse) {
     if ((getLongFromObjectOrReply(c, c->argv[2], &start, NULL) != C_OK) ||
         (getLongFromObjectOrReply(c, c->argv[3], &end, NULL) != C_OK)) return;
 
+    // 末尾可选参数展示分数
     if (c->argc == 5 && !strcasecmp(c->argv[4]->ptr,"withscores")) {
         withscores = 1;
     } else if (c->argc >= 5) {
@@ -2410,6 +2425,7 @@ void zrangeGenericCommand(client *c, int reverse) {
         return;
     }
 
+    // 没有这个zset或者key对应元素类型不是zset
     if ((zobj = lookupKeyReadOrReply(c,key,shared.emptymultibulk)) == NULL
          || checkType(c,zobj,OBJ_ZSET)) return;
 
@@ -2417,20 +2433,24 @@ void zrangeGenericCommand(client *c, int reverse) {
     llen = zsetLength(zobj);
     if (start < 0) start = llen+start;
     if (end < 0) end = llen+end;
+    // 转了一圈以上了，就认为从头开始
     if (start < 0) start = 0;
 
     /* Invariant: start >= 0, so this test will be true when end < 0.
      * The range is empty when start > end or start >= length. */
+    // 严谨的index range check
     if (start > end || start >= llen) {
         addReply(c,shared.emptymultibulk);
         return;
     }
     if (end >= llen) end = llen-1;
+    // 一个要输出多少个元素
     rangelen = (end-start)+1;
 
     /* Return the result in form of a multi-bulk reply */
     addReplyMultiBulkLen(c, withscores ? (rangelen*2) : rangelen);
 
+    // 在元素较少时，zset底层使用ziplist实现，之前已解析过ziplist，此场景可认为是普通链表
     if (zobj->encoding == OBJ_ENCODING_ZIPLIST) {
         unsigned char *zl = zobj->ptr;
         unsigned char *eptr, *sptr;
@@ -2438,6 +2458,7 @@ void zrangeGenericCommand(client *c, int reverse) {
         unsigned int vlen;
         long long vlong;
 
+        // 移动到指定下标位置，准备开始遍历
         if (reverse)
             eptr = ziplistIndex(zl,-2-(2*start));
         else
@@ -2446,6 +2467,7 @@ void zrangeGenericCommand(client *c, int reverse) {
         serverAssertWithInfo(c,zobj,eptr != NULL);
         sptr = ziplistNext(zl,eptr);
 
+        // 一个个遍历，共遍历rangelen个元素输出即可
         while (rangelen--) {
             serverAssertWithInfo(c,zobj,eptr != NULL && sptr != NULL);
             serverAssertWithInfo(c,zobj,ziplistGet(eptr,&vstr,&vlen,&vlong));
@@ -2464,6 +2486,7 @@ void zrangeGenericCommand(client *c, int reverse) {
         }
 
     } else if (zobj->encoding == OBJ_ENCODING_SKIPLIST) {
+        // 当元素到达一定数量才使用跳表, 默认域值为OBJ_ZSET_MAX_ZIPLIST_ENTRIES=128
         zset *zs = zobj->ptr;
         zskiplist *zsl = zs->zsl;
         zskiplistNode *ln;
@@ -2472,14 +2495,17 @@ void zrangeGenericCommand(client *c, int reverse) {
         /* Check if starting point is trivial, before doing log(N) lookup. */
         if (reverse) {
             ln = zsl->tail;
+            // start==0时就是从头或尾开始查找
             if (start > 0)
                 ln = zslGetElementByRank(zsl,llen-start);
         } else {
             ln = zsl->header->level[0].forward;
+            // 根据跨度span计数来找到排名为start+1的节点
             if (start > 0)
                 ln = zslGetElementByRank(zsl,start+1);
         }
 
+        // 从起始位置开始输出rangelen个节点
         while(rangelen--) {
             serverAssertWithInfo(c,zobj,ln != NULL);
             ele = ln->ele;
