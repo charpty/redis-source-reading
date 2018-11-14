@@ -200,15 +200,15 @@ int dictResize(dict *d)
  */
 int dictExpand(dict *d, unsigned long size)
 {
-    dictht n; /* the new hash table */
-    // 哈希表的桶的大小总是2的指数倍大小
-    unsigned long realsize = _dictNextPower(size);
-
     /* the size is invalid if it is smaller than the number of
      * elements already inside the hash table */
     // 如果要扩展至的大小是个无效的值则返回扩展失败
     if (dictIsRehashing(d) || d->ht[0].used > size)
         return DICT_ERR;
+
+    // 哈希表的桶的大小总是2的指数倍大小
+    dictht n; /* the new hash table */
+    unsigned long realsize = _dictNextPower(size);
 
     /* Rehashing to the same table size is not useful. */
     // 如果本来就是这个大小了则没有必要扩展了
@@ -1000,8 +1000,10 @@ unsigned int dictGetSomeKeys(dict *d, dictEntry **des, unsigned int count) {
                  * table, there will be no elements in both tables up to
                  * the current rehashing index, so we jump if possible.
                  * (this happens when going from big to small table). */
-                if (i >= d->ht[1].size) i = d->rehashidx;
-                continue;
+                if (i >= d->ht[1].size)
+                    i = d->rehashidx;
+                else
+                    continue;
             }
             if (i >= d->ht[j].size) continue; /* Out of range for this table. */
             dictEntry *he = d->ht[j].table[i];
@@ -1187,6 +1189,15 @@ unsigned long dictScan(dict *d,
             de = next;
         }
 
+        /* Set unmasked bits so incrementing the reversed cursor
+         * operates on the masked bits */
+        v |= ~m0;
+
+        /* Increment the reverse cursor */
+        v = rev(v);
+        v++;
+        v = rev(v);
+
     } else {
         t0 = &d->ht[0];
         t1 = &d->ht[1];
@@ -1221,21 +1232,15 @@ unsigned long dictScan(dict *d,
                 fn(privdata, de);
                 de = next; }
 
-            /* Increment bits not covered by the smaller mask */
-            v = (((v | m0) + 1) & ~m0) | (v & m0);
+            /* Increment the reverse cursor not covered by the smaller mask.*/
+            v |= ~m1;
+            v = rev(v);
+            v++;
+            v = rev(v);
 
             /* Continue while bits covered by mask difference is non-zero */
         } while (v & (m0 ^ m1));
     }
-
-    /* Set unmasked bits so incrementing the reversed cursor
-     * operates on the masked bits of the smaller table */
-    v |= ~m0;
-
-    /* Increment the reverse cursor */
-    v = rev(v);
-    v++;
-    v = rev(v);
 
     return v;
 }

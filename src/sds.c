@@ -54,6 +54,8 @@
 #include "sds.h"
 #include "sdsalloc.h"
 
+
+const char *SDS_NOINIT = "SDS_NOINIT";
 /*
  * 计算sdshdr结构体的大小
  * 由于不同长度的字符串使用不同类型，所以需要传递具体类型
@@ -102,13 +104,16 @@ static inline char sdsReqType(size_t string_size) {
 #if (LONG_MAX == LLONG_MAX)
     if (string_size < 1ll<<32)
         return SDS_TYPE_32;
-#endif
     return SDS_TYPE_64;
+#else
+    return SDS_TYPE_32;
+#endif
 }
 
 /* Create a new sds string with the content specified by the 'init' pointer
  * and 'initlen'.
  * If NULL is used for 'init' the string is initialized with zero bytes.
+ * If SDS_NOINIT is used, the buffer is left uninitialized;
  *
  * The string is always null-termined (all the sds strings are, always) so
  * even if you create an sds string with:
@@ -148,7 +153,9 @@ sds sdsnewlen(const void *init, size_t initlen) {
 
     // +1是为了放字符串结尾'\0'
     sh = s_malloc(hdrlen+initlen+1);
-    if (!init)
+    if (init==SDS_NOINIT)
+        init = NULL;
+    else if (!init)
         memset(sh, 0, hdrlen+initlen+1);
     if (sh == NULL) return NULL;
     s = (char*)sh+hdrlen;
@@ -399,7 +406,7 @@ sds sdsRemoveFreeSpace(sds s) {
     return s;
 }
 
-/* Return the total size of the allocation of the specifed sds string,
+/* Return the total size of the allocation of the specified sds string,
  * including:
  * 1) The sds header before the pointer.
  * 2) The string.

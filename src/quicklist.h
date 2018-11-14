@@ -40,10 +40,11 @@
  * container: 2 bits, NONE=1, ZIPLIST=2.
  * recompress: 1 bit, bool, true if node is temporarry decompressed for usage.
  * attempted_compress: 1 bit, boolean, used for verifying during testing.
- * extra: 12 bits, free for future use; pads out the remainder of 32 bits */
+ * extra: 10 bits, free for future use; pads out the remainder of 32 bits */
 /*
  * 快速列表的具体节点
  */
+>>>>>>> 7721fe83e92dee581f8703e178f8368dce86abdf
 typedef struct quicklistNode {
     // 前一个节点
     struct quicklistNode *prev;

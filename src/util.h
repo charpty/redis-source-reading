@@ -33,6 +33,11 @@
 #include <stdint.h>
 #include "sds.h"
 
+/* The maximum number of characters needed to represent a long double
+ * as a string (long double has a huge range).
+ * This should be the size of the buffer given to ld2string */
+#define MAX_LONG_DOUBLE_CHARS 5*1024
+
 int stringmatchlen(const char *p, int plen, const char *s, int slen, int nocase);
 int stringmatch(const char *p, const char *s, int nocase);
 long long memtoll(const char *p, int *err);
@@ -45,6 +50,7 @@ int string2ld(const char *s, size_t slen, long double *dp);
 int d2string(char *buf, size_t len, double value);
 int ld2string(char *buf, size_t len, long double value, int humanfriendly);
 sds getAbsolutePath(char *filename);
+unsigned long getTimeZone(void);
 int pathIsBaseName(char *path);
 
 #ifdef REDIS_TEST

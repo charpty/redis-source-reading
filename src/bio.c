@@ -19,7 +19,7 @@
  *
  * The design is trivial, we have a structure representing a job to perform
  * and a different thread and job queue for every job type.
- * Every thread wait for new jobs in its queue, and process every job
+ * Every thread waits for new jobs in its queue, and process every job
  * sequentially.
  *
  * Jobs of the same type are guaranteed to be processed from the least
@@ -211,8 +211,7 @@ void *bioProcessBackgroundJobs(void *arg) {
             // 关闭文件流
             close((long)job->arg1);
         } else if (type == BIO_AOF_FSYNC) {
-            // 备份同步fsync
-            aof_fsync((long)job->arg1);
+            redis_fsync((long)job->arg1);
         } else if (type == BIO_LAZY_FREE) {
             // 大对象lazy free, 有3种情况，估计设计成3个参数就是为了配合这里D#--
             /* What we free changes depending on what arguments are set:
@@ -231,18 +230,19 @@ void *bioProcessBackgroundJobs(void *arg) {
         // C中处处不要忘记free
         zfree(job);
 
-        /* Unblock threads blocked on bioWaitStepOfType() if any. */
+        /* Lock again before reiterating the loop, if there are no longer
+         * jobs to process we'll block again in pthread_cond_wait(). */
         // 处理redis bio提供的阻塞机制，调用者可以等待在bio_step_cond条件队列上来等待任务的完成
         // 每当一个任务完成则要唤醒一次等待在该条件队列上的线程，这是bio的一个巧妙设计，等待可以自旋来获取到还剩多少任务
         // 虽然无法直接获取某一个任务的完成与否，但是可以知道线程池的任务完成情况，用点小技巧就可以做更细判断了
-        pthread_cond_broadcast(&bio_step_cond[type]);
 
-        /* Lock again before reiterating the loop, if there are no longer
-         * jobs to process we'll block again in pthread_cond_wait(). */
         // 在进入wait状态前获取锁
         pthread_mutex_lock(&bio_mutex[type]);
         listDelNode(bio_jobs[type],ln);
         bio_pending[type]--;
+
+        /* Unblock threads blocked on bioWaitStepOfType() if any. */
+        pthread_cond_broadcast(&bio_step_cond[type]);
     }
 }
 

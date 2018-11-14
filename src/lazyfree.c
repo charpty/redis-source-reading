@@ -23,10 +23,10 @@ size_t lazyfreeGetPendingObjectsCount(void) {
  * the function just returns the number of elements the object is composed of.
  *
  * Objects composed of single allocations are always reported as having a
- * single item even if they are actaully logical composed of multiple
+ * single item even if they are actually logical composed of multiple
  * elements.
  *
- * For lists the funciton returns the number of elements in the quicklist
+ * For lists the function returns the number of elements in the quicklist
  * representing the list. */
 /*
  * 计算释放指定对象能够释放空间比例
@@ -102,6 +102,17 @@ int dbAsyncDelete(redisDb *db, robj *key) {
         return 1;
     } else {
         return 0;
+    }
+}
+
+/* Free an object, if the object is huge enough, free it in async way. */
+void freeObjAsync(robj *o) {
+    size_t free_effort = lazyfreeGetFreeEffort(o);
+    if (free_effort > LAZYFREE_THRESHOLD && o->refcount == 1) {
+        atomicIncr(lazyfree_objects,1);
+        bioCreateBackgroundJob(BIO_LAZY_FREE,o,NULL,NULL);
+    } else {
+        decrRefCount(o);
     }
 }
 

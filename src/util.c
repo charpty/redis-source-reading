@@ -39,6 +39,7 @@
 #include <float.h>
 #include <stdint.h>
 #include <errno.h>
+#include <time.h>
 
 #include "util.h"
 #include "sha1.h"
@@ -396,6 +397,7 @@ int string2ll(const char *s, size_t slen, long long *value) {
     unsigned long long v;
 
     // 字符串长度为0则返回转换失败
+    /* A zero length string is not a valid number. */
     if (plen == slen)
         return 0;
 
@@ -408,6 +410,8 @@ int string2ll(const char *s, size_t slen, long long *value) {
     }
 
     // 如果是负数
+    /* Handle negative numbers: just set a flag and continue like if it
+     * was a positive number. Later convert into negative. */
     if (p[0] == '-') {
         // 记住是负数，有效数据指针往后移动一格
         negative = 1;
@@ -424,15 +428,12 @@ int string2ll(const char *s, size_t slen, long long *value) {
         // 记录第一位数字，有效数字位往后移动
         v = p[0]-'0';
         p++; plen++;
-    } else if (p[0] == '0' && slen == 1) {
-        // 存在前导0的情况下则直接认为值为0,这里再次判断主要考虑负数情况
-        *value = 0;
-        return 1;
     } else {
         // 任意非法数字则返回转换失败
         return 0;
     }
 
+    /* Parse all the other digits, checking for overflow at every step. */
     while (plen < slen && p[0] >= '0' && p[0] <= '9') {
         if (v > (ULLONG_MAX / 10)) /* Overflow. */
             return 0;
@@ -451,6 +452,8 @@ int string2ll(const char *s, size_t slen, long long *value) {
     if (plen < slen)
         return 0;
 
+    /* Convert to negative if needed, and do the final overflow check when
+     * converting from unsigned long long to long long. */
     if (negative) {
         // 不能超出能表示都最小负数
         if (v > ((unsigned long long)(-(LLONG_MIN+1))+1)) /* Overflow. */
@@ -539,7 +542,7 @@ int string2ld(const char *s, size_t slen, long double *dp) {
 /* Convert a double to a string representation. Returns the number of bytes
  * required. The representation should always be parsable by strtod(3).
  * This function does not support human-friendly formatting like ld2string
- * does. It is intented mainly to be used inside t_zset.c when writing scores
+ * does. It is intended mainly to be used inside t_zset.c when writing scores
  * into a ziplist representing a sorted set. */
 /*
  * 将double类型转换为字符串
@@ -642,10 +645,11 @@ int ld2string(char *buf, size_t len, long double value, int humanfriendly) {
     return l;
 }
 
-/* Generate the Redis "Run ID", a SHA1-sized random number that identifies a
- * given execution of Redis, so that if you are talking with an instance
- * having run_id == A, and you reconnect and it has run_id == B, you can be
- * sure that it is either a different instance or it was restarted. */
+/* Get random bytes, attempts to get an initial seed from /dev/urandom and
+ * the uses a one way hash function in counter mode to generate a random
+ * stream. However if /dev/urandom is not available, a weaker seed is used.
+ *
+ * This function is not thread safe, since the state is global. */
 /*
  * 产生一串身份码用于唯一表示一个运行中的Redis实例
  *
@@ -653,10 +657,7 @@ int ld2string(char *buf, size_t len, long double value, int humanfriendly) {
  *      1. p: 出参，输出身份码到p
  *      2. len: 出参长度，即身份码输出的左前缀长度
  */
-void getRandomHexChars(char *p, unsigned int len) {
-    char *charset = "0123456789abcdef";
-    unsigned int j;
-
+void getRandomBytes(unsigned char *p, size_t len) {
     /* Global state. */
     // 全局状态,一次运行实例有且仅有一个身份码
     static int seed_initialized = 0;
@@ -671,71 +672,48 @@ void getRandomHexChars(char *p, unsigned int len) {
          * function we just need non-colliding strings, there are no
          * cryptographic security needs. */
         FILE *fp = fopen("/dev/urandom","r");
-        if (fp && fread(seed,sizeof(seed),1,fp) == 1)
+        if (fp == NULL || fread(seed,sizeof(seed),1,fp) != 1) {
+            /* Revert to a weaker seed, and in this case reseed again
+             * at every call.*/
+            for (unsigned int j = 0; j < sizeof(seed); j++) {
+                struct timeval tv;
+                gettimeofday(&tv,NULL);
+                pid_t pid = getpid();
+                seed[j] = tv.tv_sec ^ tv.tv_usec ^ pid ^ (long)fp;
+            }
+        } else {
             seed_initialized = 1;
+        }
         if (fp) fclose(fp);
     }
 
-    if (seed_initialized) {
-        while(len) {
-            unsigned char digest[20];
-            SHA1_CTX ctx;
-            // 一次最多输出20位
-            unsigned int copylen = len > 20 ? 20 : len;
+    while(len) {
+        unsigned char digest[20];
+        SHA1_CTX ctx;
+        unsigned int copylen = len > 20 ? 20 : len;
 
-            // 调用SHA1做散列
-            SHA1Init(&ctx);
-            SHA1Update(&ctx, seed, sizeof(seed));
-            SHA1Update(&ctx, (unsigned char*)&counter,sizeof(counter));
-            SHA1Final(digest, &ctx);
-            counter++;
+        SHA1Init(&ctx);
+        SHA1Update(&ctx, seed, sizeof(seed));
+        SHA1Update(&ctx, (unsigned char*)&counter,sizeof(counter));
+        SHA1Final(digest, &ctx);
+        counter++;
 
-            memcpy(p,digest,copylen);
-            /* Convert to hex digits. */
-            // 以散列值做下标取16进制值
-            for (j = 0; j < copylen; j++) p[j] = charset[p[j] & 0x0F];
-            len -= copylen;
-            p += copylen;
-        }
-    } else {
-        /* If we can't read from /dev/urandom, do some reasonable effort
-         * in order to create some entropy, since this function is used to
-         * generate run_id and cluster instance IDs */
-        // 这是未能从/dev/urandom读取随机数时的场景
-        // 由于身份码是众多场景下必须的，所以这里根据时间和进程ID来生成一个
-        char *x = p;
-        unsigned int l = len;
-        struct timeval tv;
-        pid_t pid = getpid();
-
-        /* Use time and PID to fill the initial array. */
-        gettimeofday(&tv,NULL);
-        // 先用微秒来填充
-        if (l >= sizeof(tv.tv_usec)) {
-            memcpy(x,&tv.tv_usec,sizeof(tv.tv_usec));
-            l -= sizeof(tv.tv_usec);
-            x += sizeof(tv.tv_usec);
-        }
-        // 还不够则用秒来填充
-        if (l >= sizeof(tv.tv_sec)) {
-            memcpy(x,&tv.tv_sec,sizeof(tv.tv_sec));
-            l -= sizeof(tv.tv_sec);
-            x += sizeof(tv.tv_sec);
-        }
-        // 再不够则使用进程ID来填充
-        if (l >= sizeof(pid)) {
-            memcpy(x,&pid,sizeof(pid));
-            l -= sizeof(pid);
-            x += sizeof(pid);
-        }
-        // 最后只能使用随机数了
-        /* Finally xor it with rand() output, that was already seeded with
-         * time() at startup, and convert to hex digits. */
-        for (j = 0; j < len; j++) {
-            p[j] ^= rand();
-            p[j] = charset[p[j] & 0x0F];
-        }
+        memcpy(p,digest,copylen);
+        len -= copylen;
+        p += copylen;
     }
+}
+
+/* Generate the Redis "Run ID", a SHA1-sized random number that identifies a
+ * given execution of Redis, so that if you are talking with an instance
+ * having run_id == A, and you reconnect and it has run_id == B, you can be
+ * sure that it is either a different instance or it was restarted. */
+void getRandomHexChars(char *p, size_t len) {
+    char *charset = "0123456789abcdef";
+    size_t j;
+
+    getRandomBytes((unsigned char*)p,len);
+    for (j = 0; j < len; j++) p[j] = charset[p[j] & 0x0F];
 }
 
 /* Given the filename, return the absolute path as an SDS string, or NULL
@@ -806,6 +784,24 @@ sds getAbsolutePath(char *filename) {
     abspath = sdscatsds(abspath,relpath);
     sdsfree(relpath);
     return abspath;
+}
+
+/*
+ * Gets the proper timezone in a more portable fashion
+ * i.e timezone variables are linux specific.
+ */
+
+unsigned long getTimeZone(void) {
+#ifdef __linux__
+    return timezone;
+#else
+    struct timeval tv;
+    struct timezone tz;
+
+    gettimeofday(&tv, &tz);
+
+    return tz.tz_minuteswest * 60UL;
+#endif
 }
 
 /* Return true if the specified path is just a file basename without any
