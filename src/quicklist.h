@@ -44,7 +44,6 @@
 /*
  * 快速列表的具体节点
  */
->>>>>>> 7721fe83e92dee581f8703e178f8368dce86abdf
 typedef struct quicklistNode {
     // 前一个节点
     struct quicklistNode *prev;

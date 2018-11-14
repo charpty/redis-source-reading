@@ -290,23 +290,38 @@ static void cliRefreshPrompt(void) {
  * The function returns NULL (if the file is /dev/null or cannot be
  * obtained for some error), or an SDS string that must be freed by
  * the user. */
+/*
+ * 获取指定配置文件(都是隐藏文件在unix下以"."开头)的路径
+ * 如果有设置指定的环境变量则使用环境的变量设定的文件路径，否则就使用用户家目录下指定文件
+ *
+ * 参数列表
+ *      1. envoerride: 哪个环境变量用于设置该文件路径
+ *      2. dotfilename: 配置文件(隐藏文件)的名称
+ *
+ * 返回值
+ *      该文件对应的文件全路径
+ */
 static sds getDotfilePath(char *envoverride, char *dotfilename) {
     char *path = NULL;
     sds dotPath = NULL;
 
     /* Check the env for a dotfile override. */
+    // 先检查指定的环境变量是否设置
     path = getenv(envoverride);
     if (path != NULL && *path != '\0') {
+        // /dev/null表示输出到空设备即不输出
         if (!strcmp("/dev/null", path)) {
             return NULL;
         }
 
         /* If the env is set, return it. */
+        // 如果设置了指定环境变量的值，则使用该值
         dotPath = sdsnew(path);
     } else {
         char *home = getenv("HOME");
         if (home != NULL && *home != '\0') {
             /* If no override is set use $HOME/<dotfilename>. */
+            // 使用用户家目录下指定文件
             dotPath = sdscatprintf(sdsempty(), "%s/%s", home, dotfilename);
         }
     }
@@ -454,6 +469,9 @@ typedef struct {
 static helpEntry *helpEntries;
 static int helpEntriesLen;
 
+/*
+ * 初始化redis版本信息
+ */
 static sds cliVersion(void) {
     sds version;
     version = sdscatprintf(sdsempty(), "%s", REDIS_VERSION);
@@ -468,6 +486,9 @@ static sds cliVersion(void) {
     return version;
 }
 
+/*
+ * 初始化帮助信息
+ */
 static void cliInitHelp(void) {
     int commandslen = sizeof(commandHelp)/sizeof(struct commandHelp);
     int groupslen = sizeof(commandGroups)/sizeof(char*);
@@ -1610,6 +1631,9 @@ void cliSetPreferences(char **argv, int argc, int interactive) {
 }
 
 /* Load the ~/.redisclirc file if any. */
+/*
+ * 如果当前目录下存在客户端属性配置文件则加载
+ */
 void cliLoadPreferences(void) {
     sds rcfile = getDotfilePath(REDIS_CLI_RCFILE_ENV,REDIS_CLI_RCFILE_DEFAULT);
     if (rcfile == NULL) return;
@@ -1617,19 +1641,25 @@ void cliLoadPreferences(void) {
     char buf[1024];
 
     if (fp) {
+        // 为什么不一次性读全然后再操作呢？
         while(fgets(buf,sizeof(buf),fp) != NULL) {
             sds *argv;
             int argc;
 
             argv = sdssplitargs(buf,&argc);
             if (argc > 0) cliSetPreferences(argv,argc,0);
+            // 释放参数数组所占内存
             sdsfreesplitres(argv,argc);
         }
         fclose(fp);
     }
+    // 释放存放文件全路径的SDS所占内存
     sdsfree(rcfile);
 }
 
+/*
+ * 处理客户端命令的主逻辑
+ */
 static void repl(void) {
     sds historyfile = NULL;
     int history = 0;
@@ -1649,6 +1679,7 @@ static void repl(void) {
     linenoiseSetFreeHintsCallback(freeHintsCallback);
 
     /* Only use history and load the rc file when stdin is a tty. */
+    // 在终端场景下，保存客户端命令历史记录
     if (isatty(fileno(stdin))) {
         historyfile = getDotfilePath(REDIS_CLI_HISTFILE_ENV,REDIS_CLI_HISTFILE_DEFAULT);
         //keep in-memory history always regardless if history file can be determined
@@ -3986,7 +4017,7 @@ static int clusterManagerFixOpenSlot(int slot) {
         }
     /* Case 3: There are no slots claiming to be in importing state, but
      * there is a migrating node that actually don't have any key or is the
-     * slot owner. We can just close the slot, probably a reshard interrupted 
+     * slot owner. We can just close the slot, probably a reshard interrupted
      * in the middle. */
         if (try_to_close_slot) {
             clusterManagerNode *n = listFirst(migrating)->value;
@@ -6684,6 +6715,9 @@ static void intrinsicLatencyMode(void) {
  * Program main()
  *--------------------------------------------------------------------------- */
 
+/*
+ * 客户端连接主函数
+ */
 int main(int argc, char **argv) {
     int firstarg;
 
@@ -6743,6 +6777,7 @@ int main(int argc, char **argv) {
     spectrum_palette = spectrum_palette_color;
     spectrum_palette_size = spectrum_palette_color_size;
 
+    // 是终端则输出到标准输出流
     if (!isatty(fileno(stdout)) && (getenv("FAKETTY") == NULL))
         config.output = OUTPUT_RAW;
     else
@@ -6765,6 +6800,7 @@ int main(int argc, char **argv) {
     }
 
     /* Latency mode */
+    // 使用旧版本模式
     if (config.latency_mode) {
         if (cliConnect(0) == REDIS_ERR) exit(1);
         latencyMode();
@@ -6777,6 +6813,7 @@ int main(int argc, char **argv) {
     }
 
     /* Slave mode */
+    // 集群节点中slave节点模式
     if (config.slave_mode) {
         if (cliConnect(0) == REDIS_ERR) exit(1);
         slaveMode();

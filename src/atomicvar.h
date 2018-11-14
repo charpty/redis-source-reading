@@ -8,16 +8,6 @@
  * atomicDecr(var,count) -- Decrement the atomic counter
  * atomicGet(var,dstvar) -- Fetch the atomic counter value
  * atomicSet(var,value)  -- Set the atomic counter value
-<<<<<<< HEAD
- *
- * The variable 'var' should also have a declared mutex with the same
- * name and the "_mutex" postfix, for instance:
- *
- *  long myvar;
- *  pthread_mutex_t myvar_mutex;
- *  atomicSet(myvar,12345);
-=======
->>>>>>> 7721fe83e92dee581f8703e178f8368dce86abdf
  *
  * The variable 'var' should also have a declared mutex with the same
  * name and the "_mutex" postfix, for instance:
